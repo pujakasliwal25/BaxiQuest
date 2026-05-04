@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+  }
+  body {
+    background-color: #0A1628;
+    color: #FFFFFF;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  input {
+    font-size: 16px; /* prevent iOS zoom */
+  }
+  button {
+    font-family: inherit;
+  }
+}
+
+/* Timer bar smooth color/width transitions handled inline via style attr */
