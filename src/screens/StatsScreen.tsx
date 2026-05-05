@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { CoinSvg } from '../components/CoinCounter'
 import { GAME_CONFIG } from '../config/gameConfig'
 import {
   groupEntriesByCell,
@@ -103,7 +104,10 @@ export function StatsScreen({
           ← Back
         </button>
         <h1 className="text-lg font-bold truncate px-2">{headerLabel}</h1>
-        <span className="w-12" />
+        <span className="inline-flex items-center gap-1 rounded-pill bg-magic-gold/15 border border-magic-gold/60 px-2 py-0.5 text-xs font-bold text-magic-gold tabular-nums">
+          <CoinSvg size={14} />
+          {userRecord?.coins ?? 0}
+        </span>
       </div>
 
       {showLeaderboard && (

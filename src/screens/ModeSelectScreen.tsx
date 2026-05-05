@@ -1,4 +1,5 @@
 import { Baxi } from '../components/Baxi'
+import { CoinCounter } from '../components/CoinCounter'
 import {
   type DigitProgress,
   getCellStat,
@@ -34,21 +35,32 @@ export function ModeSelectScreen({
 }: ModeSelectScreenProps) {
   return (
     <div className="h-full overflow-y-auto flex flex-col px-6 py-8 max-w-md mx-auto w-full">
-      <div className="flex items-start justify-between mb-8">
+      <div className="flex items-start justify-between mb-6">
         <div>
           <h1 className="text-3xl font-bold leading-tight">
             Hi {name}!<br />Ready to quest?
           </h1>
-          <button
-            onClick={onShowStats}
-            className="mt-3 inline-flex items-center gap-1 text-sm text-baxi-blue font-semibold hover:underline"
-          >
-            View stats →
-          </button>
         </div>
         <div className="shrink-0">
           <Baxi size={84} />
         </div>
+      </div>
+
+      <div className="mb-6 flex items-center justify-between gap-3 rounded-card bg-magic-gold/10 border-2 border-magic-gold/40 p-3">
+        <div className="flex items-center gap-3">
+          <div>
+            <div className="text-text-muted text-[11px] uppercase tracking-wider font-bold">
+              Your coins
+            </div>
+            <CoinCounter coins={userRecord?.coins ?? 0} />
+          </div>
+        </div>
+        <button
+          onClick={onShowStats}
+          className="min-h-touch rounded-btn bg-baxi-blue text-bg-navy font-bold text-sm px-4 py-2 active:scale-[0.99] transition-transform shadow-md"
+        >
+          📊 Scorecard
+        </button>
       </div>
 
       <section className="mb-8">

@@ -386,7 +386,7 @@ function StudentsTab({
                       <div className="flex items-center justify-between text-[11px] text-text-muted">
                         <span>{u.classCode || '—'}</span>
                         <span className="tabular-nums">
-                          {cleared} cleared · {attempted} attempted · last{' '}
+                          {cleared} cleared · {attempted} attempted · ¢{u.coins ?? 0} · last{' '}
                           {fmtDate(last)}
                         </span>
                       </div>

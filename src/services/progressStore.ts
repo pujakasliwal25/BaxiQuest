@@ -84,6 +84,9 @@ export interface UserRecord {
   curriculumLevel: CurriculumLevel
   progress: DigitProgress
   cellStats: CellStats
+  // Lifetime coin total. Earned from correct answers, never spent or lost
+  // (yet). Persisted alongside the rest of the record.
+  coins: number
 }
 
 const LS_PREFIX = 'baxiquest:user:'
@@ -158,6 +161,7 @@ function loadFromLocalStorage(userKey: string): UserRecord | null {
         : 'F1',
       progress: parsed.progress ?? {},
       cellStats: normalizeCellStats(parsed.cellStats),
+      coins: typeof parsed.coins === 'number' ? parsed.coins : 0,
     }
   } catch {
     return null
@@ -210,6 +214,7 @@ async function loadFromFirestore(userKey: string): Promise<UserRecord | null> {
         : 'F1',
       progress: data.progress ?? {},
       cellStats: normalizeCellStats(data.cellStats),
+      coins: typeof data.coins === 'number' ? data.coins : 0,
     }
   } catch (err) {
     console.warn('[progressStore] firestore load failed:', err)
@@ -257,6 +262,7 @@ export async function recordUser(
     curriculumLevel,
     progress: existing?.progress ?? {},
     cellStats: existing?.cellStats ?? {},
+    coins: existing?.coins ?? 0,
   }
 
   saveToLocalStorage(merged)
@@ -266,6 +272,7 @@ export async function recordUser(
     curriculumLevel: merged.curriculumLevel,
     progress: merged.progress,
     cellStats: merged.cellStats,
+    coins: merged.coins,
   })
 
   return merged
@@ -345,6 +352,7 @@ export async function loadAllUsers(): Promise<UserRecord[]> {
           : 'F1',
         progress: data.progress ?? {},
         cellStats: normalizeCellStats(data.cellStats),
+        coins: typeof data.coins === 'number' ? data.coins : 0,
       })
     })
     const map = new Map<string, UserRecord>()
@@ -478,6 +486,22 @@ export async function recordCellAnswer(
   }
   saveToLocalStorage(updated)
   void saveToFirestore(updated, { cellStats: updated.cellStats })
+  return updated
+}
+
+// Bumps the lifetime coin total. No-op for amount <= 0 so callers can pass
+// the formula's raw output without extra guards.
+export async function addCoins(
+  rec: UserRecord,
+  amount: number,
+): Promise<UserRecord> {
+  if (!Number.isFinite(amount) || amount <= 0) return rec
+  const updated: UserRecord = {
+    ...rec,
+    coins: (rec.coins ?? 0) + Math.round(amount),
+  }
+  saveToLocalStorage(updated)
+  void saveToFirestore(updated, { coins: updated.coins })
   return updated
 }
 

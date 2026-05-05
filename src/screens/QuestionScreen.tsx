@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnswerInput } from '../components/AnswerInput'
+import { CoinCounter } from '../components/CoinCounter'
 import { QuestionDisplay } from '../components/QuestionDisplay'
 import { TimerBar } from '../components/TimerBar'
 import { GAME_CONFIG } from '../config/gameConfig'
@@ -10,6 +11,9 @@ interface QuestionScreenProps {
   question: Question
   questionInRound: number
   consecutiveCorrect: number
+  // Lifetime coin total for the active user. Drives the header coin chip
+  // which tweens up each time the value changes.
+  coins: number
   paused: boolean
   // Level-level timer settings, picked once on the level-start screen and
   // applied to every question of the level.
@@ -24,6 +28,7 @@ export function QuestionScreen({
   question,
   questionInRound,
   consecutiveCorrect,
+  coins,
   paused,
   extraSeconds,
   noTimer,
@@ -181,13 +186,16 @@ export function QuestionScreen({
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
-      <div className="flex items-center justify-between px-4 pt-3 pb-2 text-sm shrink-0">
+      <div className="flex items-center justify-between gap-2 px-4 pt-3 pb-2 text-sm shrink-0">
         <span className="text-text-muted font-semibold">
           Q {questionInRound}/{GAME_CONFIG.questionsPerRound}
         </span>
-        <span className="text-magic-gold font-bold">
-          ✓ {consecutiveCorrect} in a row
-        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-magic-gold font-bold">
+            ✓ {consecutiveCorrect}
+          </span>
+          <CoinCounter coins={coins} compact />
+        </div>
       </div>
 
       <div className="px-4 pb-2 shrink-0">

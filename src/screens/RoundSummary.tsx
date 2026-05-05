@@ -1,3 +1,4 @@
+import { CoinSvg } from '../components/CoinCounter'
 import { GAME_CONFIG } from '../config/gameConfig'
 
 interface RoundSummaryProps {
@@ -7,6 +8,9 @@ interface RoundSummaryProps {
   consecutiveCorrect: number
   leveledUpThisRound: boolean
   wrongCount: number
+  // Coins earned during this round (resets each round). Surfaces a celebratory
+  // banner so the child sees their reward before continuing.
+  coinsThisRound: number
   onPlayAgain: () => void
   // Called when the child leveled up and chose to continue. Routes through
   // the level-start screen so the timer choice is re-asked for the new level.
@@ -22,6 +26,7 @@ export function RoundSummary({
   consecutiveCorrect,
   leveledUpThisRound,
   wrongCount,
+  coinsThisRound,
   onPlayAgain,
   onStartNextLevel,
   onChangeDigitLevel,
@@ -49,9 +54,18 @@ export function RoundSummary({
           {correct}
           <span className="text-text-muted text-3xl"> / {denominator}</span>
         </div>
-        <div className="text-text-muted mb-6">
+        <div className="text-text-muted mb-4">
           {endedEarly ? 'correct (round ended on level-up)' : 'correct'}
         </div>
+
+        {coinsThisRound > 0 && (
+          <div className="rounded-card bg-magic-gold/15 border-2 border-magic-gold/50 p-3 mb-4 flex items-center justify-center gap-2">
+            <CoinSvg size={20} />
+            <span className="text-magic-gold font-extrabold text-lg">
+              +{coinsThisRound} coins this round!
+            </span>
+          </div>
+        )}
 
         {leveledUpThisRound ? (
           <div className="rounded-card bg-level-green/20 border border-level-green/40 p-4 mb-3">

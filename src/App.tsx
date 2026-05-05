@@ -69,6 +69,7 @@ export default function App() {
           question={state.question}
           questionInRound={state.questionInRound}
           consecutiveCorrect={state.consecutiveCorrect}
+          coins={state.userRecord?.coins ?? 0}
           paused={state.feedback != null}
           extraSeconds={state.levelExtraTimeSeconds}
           noTimer={state.levelNoTimer}
@@ -88,6 +89,7 @@ export default function App() {
           consecutiveCorrect={state.consecutiveCorrect}
           leveledUpThisRound={state.leveledUpThisRound}
           wrongCount={state.wrongAttemptsThisRound.length}
+          coinsThisRound={state.coinsThisRound}
           onPlayAgain={() => actions.playAgain()}
           onStartNextLevel={() => actions.startNextLevel()}
           onChangeDigitLevel={() => actions.changeDigitLevel()}

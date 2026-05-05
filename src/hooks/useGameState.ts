@@ -5,6 +5,7 @@ import {
   recordLeaderboardEntry,
 } from '../services/leaderboardStore'
 import {
+  addCoins,
   buildUserKey,
   cellKey,
   recordCellAnswer,
@@ -13,6 +14,7 @@ import {
   saveProgress,
   type UserRecord,
 } from '../services/progressStore'
+import { type CoinPayout, computeCoinPayout } from '../utils/coins'
 import type { CurriculumLevel } from '../utils/curriculumLevel'
 import {
   type DigitType,
@@ -37,6 +39,12 @@ export interface FeedbackState {
   streak: number
   leveledUp: boolean
   newNumberCount?: number
+  // Coin payout for the answer that just produced this feedback. UI uses
+  // it to drive the floating "+N coins!" caption and the streak burst.
+  coins: CoinPayout
+  // Monotonically incremented each time feedback is set so animations can
+  // re-fire when the same payout shape repeats.
+  tick: number
 }
 
 export interface WrongAttempt {
@@ -68,6 +76,9 @@ export interface GameState {
   wrongAttemptsThisRound: WrongAttempt[]
   // Whether the child reached a new level during the current round.
   leveledUpThisRound: boolean
+  // Coins earned just within the current round. Round-summary surfaces
+  // this as "Earned X coins this round". Resets on every round start.
+  coinsThisRound: number
   // True while the child is replaying a previously-cleared cell from the
   // scorecard. Auto-leveling is suppressed in this mode so progress is
   // preserved (they can't accidentally bump their currentNumberCount up
@@ -103,6 +114,7 @@ const INITIAL_STATE: GameState = {
   levelNoTimer: false,
   wrongAttemptsThisRound: [],
   leveledUpThisRound: false,
+  coinsThisRound: 0,
   inRedo: false,
   redoCompletion: null,
 }
@@ -168,6 +180,7 @@ export function useGameState() {
           curriculumLevel,
           progress: {},
           cellStats: {},
+          coins: 0,
         }
       }
 
@@ -203,6 +216,7 @@ export function useGameState() {
         levelNoTimer: false,
         wrongAttemptsThisRound: [],
         leveledUpThisRound: false,
+      coinsThisRound: 0,
         inRedo: false,
         redoCompletion: null,
         screen: 'level-start',
@@ -240,6 +254,7 @@ export function useGameState() {
           feedback: null,
           wrongAttemptsThisRound: [],
           leveledUpThisRound: false,
+      coinsThisRound: 0,
           screen: 'question',
         }
       })
@@ -280,6 +295,7 @@ export function useGameState() {
         levelNoTimer: false,
         wrongAttemptsThisRound: [],
         leveledUpThisRound: false,
+      coinsThisRound: 0,
         inRedo: false,
         redoCompletion: null,
         screen: 'level-start',
@@ -303,6 +319,7 @@ export function useGameState() {
       correct: boolean
       threeInARowAvgMs?: number
       triggeredLevelUp: boolean
+      coinsAwarded: number
     } | null = null
     setState((s) => {
       if (!s.question || !s.digitType) return s
@@ -364,12 +381,30 @@ export function useGameState() {
 
       const leveledUpThisRound = leveledUp || s.leveledUpThisRound
 
+      // Coin payout for this answer. Wrong answers/timeouts pay 0; correct
+      // answers earn (base + speed-decayed bonus) × timer multiplier, with
+      // a fixed bonus on top whenever this answer just completed a
+      // 3-in-a-row.
+      const payout =
+        elapsedMs != null
+          ? computeCoinPayout({
+              correct: isCorrect,
+              elapsedMs,
+              baseTimerSeconds: s.question.timerSeconds,
+              levelExtraSeconds: s.levelExtraTimeSeconds,
+              levelNoTimer: s.levelNoTimer,
+              threeInARow: hitThreeInARow,
+            })
+          : { total: 0, perCorrect: 0, streakBonus: 0 }
+
       const feedback: FeedbackState = {
         kind: isCorrect ? 'correct' : 'wrong',
         correctAnswer: s.question.answer,
         streak: consecutiveCorrect,
         leveledUp,
         newNumberCount,
+        coins: payout,
+        tick: (s.feedback?.tick ?? 0) + 1,
       }
 
       if (elapsedMs != null && s.userRecord) {
@@ -381,6 +416,7 @@ export function useGameState() {
           correct: isCorrect,
           threeInARowAvgMs,
           triggeredLevelUp: leveledUp,
+          coinsAwarded: payout.total,
         }
       }
 
@@ -404,6 +440,15 @@ export function useGameState() {
         }
       }
 
+      // Optimistic coin bump on the userRecord so the UI counter ticks up
+      // immediately. The async addCoins() call below will land on the same
+      // value (it uses the pre-bump rec captured in pendingPersist.rec, not
+      // this optimistic one) so there's no double-counting.
+      const userRecord =
+        payout.total > 0 && s.userRecord
+          ? { ...s.userRecord, coins: s.userRecord.coins + payout.total }
+          : s.userRecord
+
       return {
         ...s,
         consecutiveCorrect,
@@ -412,8 +457,10 @@ export function useGameState() {
         correctInRound,
         wrongAttemptsThisRound,
         leveledUpThisRound,
+        coinsThisRound: s.coinsThisRound + payout.total,
         feedback,
         redoCompletion,
+        userRecord,
       }
     })
     if (pendingPersist) {
@@ -425,6 +472,7 @@ export function useGameState() {
         correct: boolean
         threeInARowAvgMs?: number
         triggeredLevelUp: boolean
+        coinsAwarded: number
       } = pendingPersist
       const cellId = cellKey(r.digitType, r.numberCount)
       const prevBest =
@@ -434,30 +482,36 @@ export function useGameState() {
         elapsedMs: r.elapsedMs,
         threeInARowAvgMs: r.threeInARowAvgMs,
         triggeredLevelUp: r.triggeredLevelUp,
-      }).then((updated) => {
-        setState((cur) =>
-          cur.userRecord?.userKey === updated.userKey
-            ? { ...cur, userRecord: updated }
-            : cur,
-        )
-        const newBest =
-          updated.cellStats[cellId]?.bestThreeInARowAvgMs ?? null
-        if (newBest != null && (prevBest == null || newBest < prevBest)) {
-          // New personal best 3-in-a-row at this cell → publish to the
-          // leaderboard so other students see it (and the child sees their
-          // own entry on the leaderboard view).
-          void recordLeaderboardEntry(
-            buildEntry({
-              digitType: r.digitType,
-              numberCount: r.numberCount,
-              userKey: updated.userKey,
-              name: updated.name,
-              curriculumLevel: updated.curriculumLevel,
-              avgMs: newBest,
-            }),
-          )
-        }
       })
+        .then(async (afterCells) => {
+          // Layer the coin total on top of the cell-stats write. addCoins
+          // returns the same record with the coin bump applied; if there
+          // were no coins to award (wrong answer / timeout) it short-
+          // circuits and just returns the record unchanged.
+          const updated =
+            r.coinsAwarded > 0
+              ? await addCoins(afterCells, r.coinsAwarded)
+              : afterCells
+          setState((cur) =>
+            cur.userRecord?.userKey === updated.userKey
+              ? { ...cur, userRecord: updated }
+              : cur,
+          )
+          const newBest =
+            updated.cellStats[cellId]?.bestThreeInARowAvgMs ?? null
+          if (newBest != null && (prevBest == null || newBest < prevBest)) {
+            void recordLeaderboardEntry(
+              buildEntry({
+                digitType: r.digitType,
+                numberCount: r.numberCount,
+                userKey: updated.userKey,
+                name: updated.name,
+                curriculumLevel: updated.curriculumLevel,
+                avgMs: newBest,
+              }),
+            )
+          }
+        })
     }
   },
   [],
@@ -540,6 +594,7 @@ export function useGameState() {
         feedback: null,
         wrongAttemptsThisRound: [],
         leveledUpThisRound: false,
+      coinsThisRound: 0,
         screen: 'question',
       }
     })
@@ -615,6 +670,7 @@ export function useGameState() {
           levelNoTimer: false,
           wrongAttemptsThisRound: [],
           leveledUpThisRound: false,
+      coinsThisRound: 0,
           inRedo: wasCleared,
           redoCompletion: null,
           screen: 'level-start',
@@ -639,6 +695,7 @@ export function useGameState() {
       levelNoTimer: false,
       wrongAttemptsThisRound: [],
       leveledUpThisRound: false,
+      coinsThisRound: 0,
       inRedo: false,
       redoCompletion: null,
       screen: 'mode-select',
