@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
+import { clearAllLeaderboard } from '../services/leaderboardStore'
 import {
   type CellStats,
+  clearAllUsers,
   loadAllUsers,
   type UserRecord,
 } from '../services/progressStore'
@@ -51,6 +53,29 @@ export function AdminScreen({ onLogout }: AdminScreenProps) {
     () => new Set(CURRICULUM_LEVELS),
   )
   const [nameSearch, setNameSearch] = useState('')
+
+  const [resetConfirm, setResetConfirm] = useState(false)
+  const [resetBusy, setResetBusy] = useState(false)
+  const [resetSummary, setResetSummary] = useState<string | null>(null)
+
+  const handleReset = async () => {
+    setResetBusy(true)
+    try {
+      const u = await clearAllUsers()
+      const l = await clearAllLeaderboard()
+      setResetSummary(
+        `Cleared ${u.local} local + ${u.remote} remote student record${
+          u.local + u.remote === 1 ? '' : 's'
+        }, and ${l.remote} leaderboard entr${
+          l.remote === 1 ? 'y' : 'ies'
+        }${l.local ? ' (plus local mirror)' : ''}. Logging out…`,
+      )
+      // Brief pause so the admin sees the summary before the screen unmounts.
+      setTimeout(() => onLogout(), 1200)
+    } finally {
+      setResetBusy(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -116,12 +141,20 @@ export function AdminScreen({ onLogout }: AdminScreenProps) {
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-4 pt-3 pb-2 shrink-0">
         <h1 className="text-lg font-bold">Admin</h1>
-        <button
-          onClick={onLogout}
-          className="text-sm text-text-muted hover:text-white px-2 py-1"
-        >
-          Log out
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setResetConfirm(true)}
+            className="text-sm text-quest-red hover:underline px-2 py-1"
+          >
+            Reset all
+          </button>
+          <button
+            onClick={onLogout}
+            className="text-sm text-text-muted hover:text-white px-2 py-1"
+          >
+            Log out
+          </button>
+        </div>
       </div>
 
       <div className="flex gap-2 px-4 mb-3 shrink-0">
@@ -165,6 +198,51 @@ export function AdminScreen({ onLogout }: AdminScreenProps) {
           setLevelFilters={setLevelFilters}
           onSelect={setSelectedKey}
         />
+      )}
+
+      {resetConfirm && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-30 bg-black/70 flex items-center justify-center px-4"
+          onClick={() => !resetBusy && setResetConfirm(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-card bg-card-surface border-2 border-quest-red p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h2 className="text-lg font-bold mb-1">Reset all data?</h2>
+            <p className="text-sm text-text-muted mb-4">
+              This deletes <span className="text-white font-semibold">every</span>{' '}
+              student record and leaderboard entry on this device, plus the
+              same docs in Firestore (if configured). The next student to log
+              in starts fresh. This can't be undone.
+            </p>
+
+            {resetSummary && (
+              <div className="text-sm text-level-green font-semibold mb-3">
+                {resetSummary}
+              </div>
+            )}
+
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={handleReset}
+                disabled={resetBusy || resetSummary != null}
+                className="w-full min-h-touch bg-quest-red text-white font-bold rounded-btn px-4 py-3 active:scale-[0.99] transition-transform disabled:opacity-60"
+              >
+                {resetBusy ? 'Clearing…' : 'Yes, reset everything'}
+              </button>
+              <button
+                onClick={() => setResetConfirm(false)}
+                disabled={resetBusy}
+                className="w-full min-h-touch bg-card-surface text-white border border-card-border font-bold rounded-btn px-4 py-3 active:scale-[0.99] transition-transform disabled:opacity-60"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )

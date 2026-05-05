@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteDoc,
   doc,
   getDoc,
   getDocs,
@@ -281,6 +282,39 @@ export async function loadKnownCurriculumLevel(
   const local = loadFromLocalStorage(userKey)
   if (local) return local.curriculumLevel
   return null
+}
+
+// Admin: wipe every student record. Clears localStorage and (if Firestore
+// is configured) deletes every doc in the users collection. Returns the
+// number of records cleared from each source.
+export async function clearAllUsers(): Promise<{
+  local: number
+  remote: number
+}> {
+  let local = 0
+  try {
+    const toRemove: string[] = []
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const k = window.localStorage.key(i)
+      if (k && k.startsWith(LS_PREFIX)) toRemove.push(k)
+    }
+    for (const k of toRemove) window.localStorage.removeItem(k)
+    local = toRemove.length
+  } catch (err) {
+    console.warn('[progressStore] clearAllUsers local failed:', err)
+  }
+  let remote = 0
+  const db = getDb()
+  if (db) {
+    try {
+      const snap = await getDocs(collection(db, 'users'))
+      await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)))
+      remote = snap.size
+    } catch (err) {
+      console.warn('[progressStore] clearAllUsers firestore failed:', err)
+    }
+  }
+  return { local, remote }
 }
 
 // Admin: fetch every user record we know about. Tries Firestore first and

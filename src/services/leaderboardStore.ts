@@ -1,5 +1,6 @@
 import {
   collection,
+  deleteDoc,
   doc,
   getDocs,
   serverTimestamp,
@@ -160,6 +161,32 @@ export async function loadAllLeaderboardEntries(): Promise<
     console.warn('[leaderboard] read failed, falling back to ls:', err)
     return loadEntriesFromLocalStorage()
   }
+}
+
+// Admin: wipe the entire leaderboard from both localStorage and Firestore.
+export async function clearAllLeaderboard(): Promise<{
+  local: boolean
+  remote: number
+}> {
+  let local = false
+  try {
+    if (window.localStorage.getItem(LS_KEY) != null) local = true
+    window.localStorage.removeItem(LS_KEY)
+  } catch (err) {
+    console.warn('[leaderboard] clear local failed:', err)
+  }
+  let remote = 0
+  const db = getDb()
+  if (db) {
+    try {
+      const snap = await getDocs(collection(db, COLLECTION))
+      await Promise.all(snap.docs.map((d) => deleteDoc(d.ref)))
+      remote = snap.size
+    } catch (err) {
+      console.warn('[leaderboard] clear firestore failed:', err)
+    }
+  }
+  return { local, remote }
 }
 
 // Group entries by cellKey for O(1) lookup in the leaderboard view.
