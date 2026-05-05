@@ -6,6 +6,7 @@ import { LevelStartScreen } from './screens/LevelStartScreen'
 import { LoginScreen } from './screens/LoginScreen'
 import { ModeSelectScreen } from './screens/ModeSelectScreen'
 import { QuestionScreen } from './screens/QuestionScreen'
+import { RedoCompleteScreen } from './screens/RedoCompleteScreen'
 import { RoundSummary } from './screens/RoundSummary'
 import { StatsScreen } from './screens/StatsScreen'
 
@@ -86,6 +87,23 @@ export default function App() {
           onStartNextLevel={() => actions.startNextLevel()}
           onChangeDigitLevel={() => actions.changeDigitLevel()}
           onGetBetter={() => actions.enterGetBetterMode()}
+        />
+      )}
+
+      {state.screen === 'redo-complete' && state.redoCompletion && (
+        <RedoCompleteScreen
+          digitType={state.redoCompletion.digitType}
+          numberCount={state.redoCompletion.numberCount}
+          avgMs={state.redoCompletion.avgMs}
+          previousBestMs={state.redoCompletion.previousBestMs}
+          onTryAgain={() =>
+            state.redoCompletion &&
+            actions.redoLevel(
+              state.redoCompletion.digitType,
+              state.redoCompletion.numberCount,
+            )
+          }
+          onBackToScorecard={() => actions.showStats()}
         />
       )}
 

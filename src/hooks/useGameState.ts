@@ -27,6 +27,7 @@ export type Screen =
   | 'level-start'
   | 'question'
   | 'round-summary'
+  | 'redo-complete'
   | 'get-better'
 
 export interface FeedbackState {
@@ -71,6 +72,18 @@ export interface GameState {
   // preserved (they can't accidentally bump their currentNumberCount up
   // by getting 3-in-a-row at a level they already cleared).
   inRedo: boolean
+  // Set when a redo run produces a 3-in-a-row. Drives the redo-complete
+  // celebration screen and ends the round early. Cleared when the child
+  // exits or starts a new redo.
+  redoCompletion: {
+    avgMs: number
+    // The previous best at this cell *before* this run. Lets the
+    // celebration screen show "X faster than your last best" or
+    // "🎉 new best!" when applicable.
+    previousBestMs: number | null
+    digitType: DigitType
+    numberCount: number
+  } | null
 }
 
 const INITIAL_STATE: GameState = {
@@ -90,6 +103,7 @@ const INITIAL_STATE: GameState = {
   wrongAttemptsThisRound: [],
   leveledUpThisRound: false,
   inRedo: false,
+  redoCompletion: null,
 }
 
 function startCountFor(rec: UserRecord | null, dt: DigitType): number {
@@ -176,6 +190,7 @@ export function useGameState() {
         wrongAttemptsThisRound: [],
         leveledUpThisRound: false,
         inRedo: false,
+        redoCompletion: null,
         screen: 'level-start',
       }
     })
@@ -252,6 +267,7 @@ export function useGameState() {
         wrongAttemptsThisRound: [],
         leveledUpThisRound: false,
         inRedo: false,
+        redoCompletion: null,
         screen: 'level-start',
       }
     })
@@ -354,6 +370,26 @@ export function useGameState() {
         }
       }
 
+      // Redo mode: a 3-in-a-row signals the child has succeeded at this
+      // run. Capture the avg + their previous best so the celebration
+      // screen can compare them, and end the round on the next advance.
+      let redoCompletion = s.redoCompletion
+      if (
+        hitThreeInARow &&
+        s.inRedo &&
+        threeInARowAvgMs != null &&
+        s.userRecord
+      ) {
+        const cell =
+          s.userRecord.cellStats[cellKey(statDigitType, statNumberCount)]
+        redoCompletion = {
+          avgMs: threeInARowAvgMs,
+          previousBestMs: cell?.bestThreeInARowAvgMs ?? null,
+          digitType: statDigitType,
+          numberCount: statNumberCount,
+        }
+      }
+
       return {
         ...s,
         consecutiveCorrect,
@@ -363,6 +399,7 @@ export function useGameState() {
         wrongAttemptsThisRound,
         leveledUpThisRound,
         feedback,
+        redoCompletion,
       }
     })
     if (pendingPersist) {
@@ -419,6 +456,17 @@ export function useGameState() {
 
       const justLeveledUp = s.feedback?.leveledUp === true
       const finishedRound = s.questionInRound >= GAME_CONFIG.questionsPerRound
+
+      // Redo run with a 3-in-a-row: end the round on the celebration screen.
+      // No round-summary, no Get Better Mode — the run "ends" the moment the
+      // child hits their goal.
+      if (s.inRedo && s.redoCompletion != null) {
+        return {
+          ...s,
+          feedback: null,
+          screen: 'redo-complete',
+        }
+      }
 
       // Level-up ends the current round immediately, no matter where we are
       // in it. The wrongs we collected belong to the OLD level — round-summary
@@ -554,6 +602,7 @@ export function useGameState() {
           wrongAttemptsThisRound: [],
           leveledUpThisRound: false,
           inRedo: wasCleared,
+          redoCompletion: null,
           screen: 'level-start',
         }
       })
@@ -577,6 +626,7 @@ export function useGameState() {
       wrongAttemptsThisRound: [],
       leveledUpThisRound: false,
       inRedo: false,
+      redoCompletion: null,
       screen: 'mode-select',
     }))
   }, [])
