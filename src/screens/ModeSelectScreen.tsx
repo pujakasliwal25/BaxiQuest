@@ -16,6 +16,7 @@ interface ModeSelectScreenProps {
   progress: DigitProgress
   userRecord: UserRecord | null
   onPickDigitType: (digitType: DigitType) => void
+  onShowStats: () => void
 }
 
 function formatAvgSeconds(ms: number): string {
@@ -29,13 +30,22 @@ export function ModeSelectScreen({
   progress,
   userRecord,
   onPickDigitType,
+  onShowStats,
 }: ModeSelectScreenProps) {
   return (
     <div className="h-full overflow-y-auto flex flex-col px-6 py-8 max-w-md mx-auto w-full">
       <div className="flex items-start justify-between mb-8">
-        <h1 className="text-3xl font-bold leading-tight">
-          Hi {name}!<br />Ready to quest?
-        </h1>
+        <div>
+          <h1 className="text-3xl font-bold leading-tight">
+            Hi {name}!<br />Ready to quest?
+          </h1>
+          <button
+            onClick={onShowStats}
+            className="mt-3 inline-flex items-center gap-1 text-sm text-baxi-blue font-semibold hover:underline"
+          >
+            View stats →
+          </button>
+        </div>
         <div className="shrink-0">
           <Baxi size={84} />
         </div>

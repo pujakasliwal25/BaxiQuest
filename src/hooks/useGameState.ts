@@ -18,6 +18,7 @@ import {
 export type Screen =
   | 'login'
   | 'mode-select'
+  | 'stats'
   | 'level-start'
   | 'question'
   | 'round-summary'
@@ -482,6 +483,39 @@ export function useGameState() {
     }))
   }, [])
 
+  const showStats = useCallback(() => {
+    setState((s) => ({ ...s, screen: 'stats' }))
+  }, [])
+
+  const hideStats = useCallback(() => {
+    setState((s) => ({ ...s, screen: 'mode-select' }))
+  }, [])
+
+  // Replaced with the real redo behavior in Phase E. For now, just sends the
+  // child to a fresh level-start at the chosen cell. Auto-leveling suppression
+  // and progress preservation are layered on next.
+  const redoLevel = useCallback(
+    (digitType: DigitType, numberCount: number) => {
+      setState((s) => ({
+        ...s,
+        digitType,
+        currentNumberCount: numberCount,
+        consecutiveCorrect: 0,
+        streakCorrectMs: [],
+        questionInRound: 0,
+        correctInRound: 0,
+        question: null,
+        feedback: null,
+        levelExtraTimeSeconds: 0,
+        levelNoTimer: false,
+        wrongAttemptsThisRound: [],
+        leveledUpThisRound: false,
+        screen: 'level-start',
+      }))
+    },
+    [],
+  )
+
   const changeDigitLevel = useCallback(() => {
     setState((s) => ({
       ...s,
@@ -537,6 +571,9 @@ export function useGameState() {
       enterGetBetterMode,
       exitGetBetterMode,
       changeDigitLevel,
+      showStats,
+      hideStats,
+      redoLevel,
       logout,
     }),
     [
@@ -551,6 +588,9 @@ export function useGameState() {
       enterGetBetterMode,
       exitGetBetterMode,
       changeDigitLevel,
+      showStats,
+      hideStats,
+      redoLevel,
       logout,
     ],
   )

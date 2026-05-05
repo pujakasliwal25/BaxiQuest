@@ -7,6 +7,7 @@ import { LoginScreen } from './screens/LoginScreen'
 import { ModeSelectScreen } from './screens/ModeSelectScreen'
 import { QuestionScreen } from './screens/QuestionScreen'
 import { RoundSummary } from './screens/RoundSummary'
+import { StatsScreen } from './screens/StatsScreen'
 
 const FEEDBACK_DURATION_MS = 1500
 
@@ -34,6 +35,15 @@ export default function App() {
           progress={state.userRecord?.progress ?? {}}
           userRecord={state.userRecord}
           onPickDigitType={(dt) => actions.startGame(dt)}
+          onShowStats={() => actions.showStats()}
+        />
+      )}
+
+      {state.screen === 'stats' && (
+        <StatsScreen
+          userRecord={state.userRecord}
+          onBack={() => actions.hideStats()}
+          onRedo={(dt, nc) => actions.redoLevel(dt, nc)}
         />
       )}
 
