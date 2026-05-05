@@ -1,11 +1,22 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { GAME_CONFIG } from '../config/gameConfig'
 import {
+  groupEntriesByCell,
+  type LeaderboardEntry,
+  loadAllLeaderboardEntries,
+  pickBestForCell,
+} from '../services/leaderboardStore'
+import {
+  cellKey,
   type CellStat,
   getCellStat,
   headlineAvgMs,
   type UserRecord,
 } from '../services/progressStore'
+import {
+  CURRICULUM_LEVELS,
+  type CurriculumLevel,
+} from '../utils/curriculumLevel'
 import {
   ALL_DIGIT_TYPES,
   DIGIT_TYPE_LABELS,
@@ -112,9 +123,7 @@ export function StatsScreen({
             onSelectCell={(dt, nc) => setSelected({ dt, nc })}
           />
         ) : (
-          <div className="text-text-muted text-center py-16 px-6">
-            Leaderboard is coming soon!
-          </div>
+          <LeaderboardMatrix />
         )}
       </div>
 
@@ -320,6 +329,168 @@ function CellDetailModal({
           </p>
         )}
       </div>
+    </div>
+  )
+}
+
+function LeaderboardMatrix() {
+  const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [selectedLevels, setSelectedLevels] = useState<
+    Set<CurriculumLevel>
+  >(() => new Set(CURRICULUM_LEVELS))
+
+  useEffect(() => {
+    let cancelled = false
+    loadAllLeaderboardEntries()
+      .then((es) => {
+        if (cancelled) return
+        setEntries(es)
+      })
+      .catch((err) => {
+        if (cancelled) return
+        console.warn('[stats] leaderboard load failed', err)
+        setError('Could not load leaderboard. Try again later.')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const grouped = useMemo(
+    () => groupEntriesByCell(entries ?? []),
+    [entries],
+  )
+
+  const allSelected = selectedLevels.size === CURRICULUM_LEVELS.length
+  const filterSet: Set<CurriculumLevel> | null = allSelected
+    ? null
+    : selectedLevels
+
+  const toggleLevel = (lv: CurriculumLevel) => {
+    setSelectedLevels((prev) => {
+      const next = new Set(prev)
+      if (next.has(lv)) next.delete(lv)
+      else next.add(lv)
+      return next
+    })
+  }
+
+  return (
+    <div>
+      <div className="px-2 mb-3">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-xs text-text-muted uppercase tracking-wider font-semibold">
+            Filter by level
+          </h3>
+          <div className="flex gap-1">
+            <button
+              onClick={() =>
+                setSelectedLevels(new Set(CURRICULUM_LEVELS))
+              }
+              className="text-[11px] text-baxi-blue font-semibold hover:underline"
+            >
+              All
+            </button>
+            <span className="text-text-muted text-[11px]">·</span>
+            <button
+              onClick={() => setSelectedLevels(new Set())}
+              className="text-[11px] text-baxi-blue font-semibold hover:underline"
+            >
+              None
+            </button>
+          </div>
+        </div>
+        <div className="flex flex-wrap gap-1">
+          {CURRICULUM_LEVELS.map((lv) => {
+            const on = selectedLevels.has(lv)
+            return (
+              <button
+                key={lv}
+                onClick={() => toggleLevel(lv)}
+                className={`px-2 py-1 rounded-pill text-[11px] font-bold border transition-colors ${
+                  on
+                    ? 'bg-magic-gold text-bg-navy border-magic-gold'
+                    : 'bg-card-surface border-card-border text-text-muted'
+                }`}
+              >
+                {lv}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+
+      {error && (
+        <div className="text-quest-red text-sm text-center py-4">{error}</div>
+      )}
+
+      {entries == null && !error && (
+        <div className="text-text-muted text-sm text-center py-8">
+          Loading leaderboard…
+        </div>
+      )}
+
+      {entries != null && (
+        <div className="overflow-x-auto">
+          <table className="border-separate border-spacing-1">
+            <thead>
+              <tr>
+                <th className="sticky left-0 bg-bg-navy z-10 px-1 py-1 text-text-muted text-[10px] font-semibold uppercase tracking-wider">
+                  #
+                </th>
+                {ALL_DIGIT_TYPES.map((dt) => (
+                  <th
+                    key={dt}
+                    className="px-1 py-1 text-text-muted text-[10px] font-semibold uppercase tracking-wider"
+                  >
+                    {SHORT_LABELS[dt]}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {NUMBER_COUNTS.map((nc) => (
+                <tr key={nc}>
+                  <td className="sticky left-0 bg-bg-navy z-10 px-1 py-1 text-text-muted font-bold text-xs text-center">
+                    {nc}
+                  </td>
+                  {ALL_DIGIT_TYPES.map((dt) => {
+                    const best = pickBestForCell(
+                      grouped.get(cellKey(dt, nc)),
+                      filterSet,
+                    )
+                    return (
+                      <td key={dt} className="p-0">
+                        <div
+                          className={`w-20 h-12 flex flex-col items-center justify-center rounded-md text-[10px] px-1 ${
+                            best
+                              ? 'bg-magic-gold/15 border border-magic-gold/40 text-white'
+                              : 'bg-card-surface border border-card-border text-text-muted'
+                          }`}
+                        >
+                          {best ? (
+                            <>
+                              <div className="font-bold truncate w-full text-center">
+                                {best.name}
+                              </div>
+                              <div className="text-[9px] opacity-80 tabular-nums">
+                                {best.curriculumLevel} · {fmtMs(best.avgMs)}
+                              </div>
+                            </>
+                          ) : (
+                            <div className="text-[10px]">—</div>
+                          )}
+                        </div>
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   )
 }

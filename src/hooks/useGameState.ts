@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GAME_CONFIG } from '../config/gameConfig'
 import {
+  buildEntry,
+  recordLeaderboardEntry,
+} from '../services/leaderboardStore'
+import {
   buildUserKey,
+  cellKey,
   recordCellAnswer,
   recordCellAttemptStart,
   recordUser,
@@ -370,6 +375,9 @@ export function useGameState() {
         threeInARowAvgMs?: number
         triggeredLevelUp: boolean
       } = pendingPersist
+      const cellId = cellKey(r.digitType, r.numberCount)
+      const prevBest =
+        r.rec.cellStats[cellId]?.bestThreeInARowAvgMs ?? null
       void recordCellAnswer(r.rec, r.digitType, r.numberCount, {
         correct: r.correct,
         elapsedMs: r.elapsedMs,
@@ -381,6 +389,23 @@ export function useGameState() {
             ? { ...cur, userRecord: updated }
             : cur,
         )
+        const newBest =
+          updated.cellStats[cellId]?.bestThreeInARowAvgMs ?? null
+        if (newBest != null && (prevBest == null || newBest < prevBest)) {
+          // New personal best 3-in-a-row at this cell → publish to the
+          // leaderboard so other students see it (and the child sees their
+          // own entry on the leaderboard view).
+          void recordLeaderboardEntry(
+            buildEntry({
+              digitType: r.digitType,
+              numberCount: r.numberCount,
+              userKey: updated.userKey,
+              name: updated.name,
+              curriculumLevel: updated.curriculumLevel,
+              avgMs: newBest,
+            }),
+          )
+        }
       })
     }
   },
