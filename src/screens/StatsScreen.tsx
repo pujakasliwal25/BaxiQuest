@@ -333,7 +333,7 @@ function CellDetailModal({
   )
 }
 
-function LeaderboardMatrix() {
+export function LeaderboardMatrix() {
   const [entries, setEntries] = useState<LeaderboardEntry[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selectedLevels, setSelectedLevels] = useState<

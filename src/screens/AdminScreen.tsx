@@ -8,7 +8,9 @@ import {
   CURRICULUM_LEVELS,
   type CurriculumLevel,
 } from '../utils/curriculumLevel'
-import { StatsScreen } from './StatsScreen'
+import { LeaderboardMatrix, StatsScreen } from './StatsScreen'
+
+type AdminTab = 'students' | 'leaderboard'
 
 interface AdminScreenProps {
   onLogout: () => void
@@ -39,6 +41,7 @@ function fmtDate(at: number | null): string {
 }
 
 export function AdminScreen({ onLogout }: AdminScreenProps) {
+  const [tab, setTab] = useState<AdminTab>('students')
   const [users, setUsers] = useState<UserRecord[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
@@ -112,7 +115,7 @@ export function AdminScreen({ onLogout }: AdminScreenProps) {
   return (
     <div className="h-full flex flex-col">
       <div className="flex items-center justify-between px-4 pt-3 pb-2 shrink-0">
-        <h1 className="text-lg font-bold">Admin · Students</h1>
+        <h1 className="text-lg font-bold">Admin</h1>
         <button
           onClick={onLogout}
           className="text-sm text-text-muted hover:text-white px-2 py-1"
@@ -121,6 +124,81 @@ export function AdminScreen({ onLogout }: AdminScreenProps) {
         </button>
       </div>
 
+      <div className="flex gap-2 px-4 mb-3 shrink-0">
+        <button
+          onClick={() => setTab('students')}
+          className={`flex-1 min-h-touch rounded-pill text-sm font-bold transition-colors ${
+            tab === 'students'
+              ? 'bg-magic-gold text-bg-navy'
+              : 'bg-card-surface border border-card-border text-white'
+          }`}
+        >
+          Students
+        </button>
+        <button
+          onClick={() => setTab('leaderboard')}
+          className={`flex-1 min-h-touch rounded-pill text-sm font-bold transition-colors ${
+            tab === 'leaderboard'
+              ? 'bg-magic-gold text-bg-navy'
+              : 'bg-card-surface border border-card-border text-white'
+          }`}
+        >
+          Leaderboard
+        </button>
+      </div>
+
+      {tab === 'leaderboard' ? (
+        <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-4">
+          <LeaderboardMatrix />
+        </div>
+      ) : (
+        <StudentsTab
+          users={users}
+          error={error}
+          filtered={filtered}
+          classFilter={classFilter}
+          setClassFilter={setClassFilter}
+          nameSearch={nameSearch}
+          setNameSearch={setNameSearch}
+          levelFilters={levelFilters}
+          toggleLevel={toggleLevel}
+          setLevelFilters={setLevelFilters}
+          onSelect={setSelectedKey}
+        />
+      )}
+    </div>
+  )
+}
+
+interface StudentsTabProps {
+  users: UserRecord[] | null
+  error: string | null
+  filtered: UserRecord[]
+  classFilter: string
+  setClassFilter: (v: string) => void
+  nameSearch: string
+  setNameSearch: (v: string) => void
+  levelFilters: Set<CurriculumLevel>
+  toggleLevel: (lv: CurriculumLevel) => void
+  setLevelFilters: (s: Set<CurriculumLevel>) => void
+  onSelect: (userKey: string) => void
+}
+
+function StudentsTab({
+  users,
+  error,
+  filtered,
+  classFilter,
+  setClassFilter,
+  nameSearch,
+  setNameSearch,
+  levelFilters,
+  toggleLevel,
+  setLevelFilters,
+  onSelect,
+}: StudentsTabProps) {
+  return (
+    <>
       <div className="px-4 pb-3 shrink-0 space-y-2">
         <div className="grid grid-cols-2 gap-2">
           <input
@@ -216,7 +294,7 @@ export function AdminScreen({ onLogout }: AdminScreenProps) {
                 return (
                   <li key={u.userKey}>
                     <button
-                      onClick={() => setSelectedKey(u.userKey)}
+                      onClick={() => onSelect(u.userKey)}
                       className="w-full text-left rounded-card bg-card-surface border border-card-border p-3 active:scale-[0.99] transition-transform hover:border-magic-gold"
                     >
                       <div className="flex items-center justify-between mb-1">
@@ -242,6 +320,6 @@ export function AdminScreen({ onLogout }: AdminScreenProps) {
           </>
         )}
       </div>
-    </div>
+    </>
   )
 }
