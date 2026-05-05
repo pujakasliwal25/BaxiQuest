@@ -1,15 +1,44 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Baxi } from '../components/Baxi'
+import { buildUserKey, loadKnownCurriculumLevel } from '../services/progressStore'
+import {
+  CURRICULUM_LEVELS,
+  type CurriculumLevel,
+} from '../utils/curriculumLevel'
 
 interface LoginScreenProps {
-  onSubmit: (classCode: string, name: string) => Promise<boolean> | boolean
+  onSubmit: (
+    classCode: string,
+    name: string,
+    curriculumLevel: CurriculumLevel,
+  ) => Promise<boolean> | boolean
 }
 
 export function LoginScreen({ onSubmit }: LoginScreenProps) {
   const [classCode, setClassCode] = useState('')
   const [name, setName] = useState('')
+  const [curriculumLevel, setCurriculumLevel] =
+    useState<CurriculumLevel>('F1')
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
+
+  // If the child has logged in before on this device with the same
+  // (classCode, name), pre-fill the dropdown with what they last picked so
+  // they don't have to re-enter it every time.
+  useEffect(() => {
+    const code = classCode.trim().toUpperCase()
+    const trimmedName = name.trim()
+    if (!code || !trimmedName) return
+    const key = buildUserKey(code, trimmedName)
+    let cancelled = false
+    loadKnownCurriculumLevel(key).then((known) => {
+      if (cancelled) return
+      if (known) setCurriculumLevel(known)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [classCode, name])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -20,7 +49,7 @@ export function LoginScreen({ onSubmit }: LoginScreenProps) {
     }
     setLoading(true)
     try {
-      const ok = await onSubmit(classCode, name)
+      const ok = await onSubmit(classCode, name, curriculumLevel)
       if (!ok) {
         setError('Oops! Check your class code')
       }
@@ -74,6 +103,23 @@ export function LoginScreen({ onSubmit }: LoginScreenProps) {
               className="bg-card-surface text-white text-lg px-4 py-3 rounded-btn border border-card-border focus:border-deep-blue focus:outline-none disabled:opacity-60"
               placeholder="Your name"
             />
+          </label>
+          <label className="flex flex-col gap-2">
+            <span className="text-sm text-text-muted">Your level</span>
+            <select
+              value={curriculumLevel}
+              onChange={(e) =>
+                setCurriculumLevel(e.target.value as CurriculumLevel)
+              }
+              disabled={loading}
+              className="bg-card-surface text-white text-lg px-4 py-3 rounded-btn border border-card-border focus:border-deep-blue focus:outline-none disabled:opacity-60"
+            >
+              {CURRICULUM_LEVELS.map((lv) => (
+                <option key={lv} value={lv}>
+                  {lv}
+                </option>
+              ))}
+            </select>
           </label>
 
           {error && (

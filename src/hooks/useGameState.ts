@@ -7,6 +7,7 @@ import {
   saveProgress,
   type UserRecord,
 } from '../services/progressStore'
+import type { CurriculumLevel } from '../utils/curriculumLevel'
 import {
   type DigitType,
   type Question,
@@ -90,7 +91,11 @@ export function useGameState() {
   }
 
   const login = useCallback(
-    async (classCode: string, name: string): Promise<boolean> => {
+    async (
+      classCode: string,
+      name: string,
+      curriculumLevel: CurriculumLevel,
+    ): Promise<boolean> => {
       const normalized = classCode.trim().toUpperCase()
       const valid = GAME_CONFIG.validClassCodes
         .map((c) => c.toUpperCase())
@@ -102,13 +107,19 @@ export function useGameState() {
 
       let userRecord: UserRecord
       try {
-        userRecord = await recordUser(userKey, trimmedName, normalized)
+        userRecord = await recordUser(
+          userKey,
+          trimmedName,
+          normalized,
+          curriculumLevel,
+        )
       } catch (err) {
         console.warn('[useGameState] login persistence failed:', err)
         userRecord = {
           userKey,
           name: trimmedName,
           classCode: normalized,
+          curriculumLevel,
           progress: {},
           timeStats: {},
         }

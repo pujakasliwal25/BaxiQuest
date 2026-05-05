@@ -24,7 +24,7 @@ export default function App() {
     <div className="h-dvh bg-bg-navy text-white">
       {state.screen === 'login' && (
         <LoginScreen
-          onSubmit={(code, name) => actions.login(code, name)}
+          onSubmit={(code, name, level) => actions.login(code, name, level)}
         />
       )}
 
