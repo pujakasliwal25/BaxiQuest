@@ -49,11 +49,25 @@ export function QuestionScreen({
   const wasListeningRef = useRef(false)
   const onSubmitRef = useRef(onSubmit)
   onSubmitRef.current = onSubmit
-  // Wall-clock timestamp captured when this question first appeared. Used to
-  // compute elapsed time on submit/timeout for the per-level avg-time stat.
+  // Wall-clock timestamp captured when this question first appeared. The
+  // elapsed-time metric for stats is from this point until the FIRST press
+  // of Type or Speak (decision moment) — typing/speaking time is excluded.
   const questionStartedAtRef = useRef<number>(performance.now())
-  const elapsedSinceStart = () =>
-    Math.max(0, performance.now() - questionStartedAtRef.current)
+  // Set the first time the child presses Type or Speak. Subsequent toggles
+  // (Back from Type, switching modes) don't reset it.
+  const decidedAtRef = useRef<number | null>(null)
+  const markDecided = () => {
+    if (decidedAtRef.current == null) {
+      decidedAtRef.current = performance.now()
+    }
+  }
+  // Snapshot the elapsed time. If the child has pressed Type/Speak, return
+  // the time-to-decision; otherwise (timeout before any press), the full
+  // wall-clock elapsed.
+  const decidedElapsedMs = () => {
+    const stop = decidedAtRef.current ?? performance.now()
+    return Math.max(0, stop - questionStartedAtRef.current)
+  }
 
   useEffect(() => {
     setAnswer('')
@@ -63,6 +77,7 @@ export function QuestionScreen({
     wasListeningRef.current = false
     speech.reset()
     questionStartedAtRef.current = performance.now()
+    decidedAtRef.current = null
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [question])
 
@@ -71,7 +86,7 @@ export function QuestionScreen({
     if (submittedRef.current) return
     if (speech.parsedNumber == null) return
     const value = speech.parsedNumber
-    const elapsed = elapsedSinceStart()
+    const elapsed = decidedElapsedMs()
     markSubmitted(true)
     setAnswer(String(value))
     setSpeakActive(false)
@@ -109,7 +124,7 @@ export function QuestionScreen({
     if (!typeActive) return
     if (paused) return
     if (answer.trim() === '') return
-    const elapsed = elapsedSinceStart()
+    const elapsed = decidedElapsedMs()
     markSubmitted(true)
     setTypeActive(false)
     speech.stopListening()
@@ -119,7 +134,7 @@ export function QuestionScreen({
 
   const handleTimeout = () => {
     if (submittedRef.current) return
-    const elapsed = elapsedSinceStart()
+    const elapsed = decidedElapsedMs()
     markSubmitted(true)
     setTypeActive(false)
     setSpeakActive(false)
@@ -131,6 +146,7 @@ export function QuestionScreen({
     if (submittedRef.current || paused) return
     if (!speech.supported) return
     if (speakActive) return
+    markDecided()
     if (typeActive) {
       // Switch from type to speak: cancel type, then start speak.
       setTypeActive(false)
@@ -142,10 +158,13 @@ export function QuestionScreen({
   const handleType = () => {
     if (submittedRef.current || paused) return
     if (typeActive) {
-      // Toggle off — back to question view.
+      // Toggle off — back to question view. The decision moment is sticky
+      // (we already captured it on the first press), so toggling Back
+      // doesn't restart the clock.
       setTypeActive(false)
       return
     }
+    markDecided()
     if (speakActive) {
       // Switch from speak to type: cancel speak, then start type.
       setSpeakActive(false)
