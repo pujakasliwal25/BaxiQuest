@@ -8,6 +8,9 @@ interface RoundSummaryProps {
   leveledUpThisRound: boolean
   wrongCount: number
   onPlayAgain: () => void
+  // Called when the child leveled up and chose to continue. Routes through
+  // the level-start screen so the timer choice is re-asked for the new level.
+  onStartNextLevel: () => void
   onChangeDigitLevel: () => void
   onGetBetter: () => void
 }
@@ -20,6 +23,7 @@ export function RoundSummary({
   leveledUpThisRound,
   wrongCount,
   onPlayAgain,
+  onStartNextLevel,
   onChangeDigitLevel,
   onGetBetter,
 }: RoundSummaryProps) {
@@ -95,7 +99,7 @@ export function RoundSummary({
           {leveledUpThisRound ? (
             <>
               <button
-                onClick={onPlayAgain}
+                onClick={onStartNextLevel}
                 className="w-full min-h-touch bg-magic-gold text-bg-navy font-bold text-lg rounded-btn px-4 py-3 active:scale-[0.99] transition-transform"
               >
                 {continueLabel}

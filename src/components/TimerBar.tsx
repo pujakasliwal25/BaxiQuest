@@ -2,9 +2,12 @@ import { useEffect, useRef, useState } from 'react'
 
 interface TimerBarProps {
   baseSeconds: number
-  // Extra seconds the child has earned via the "+ time" button.
-  // Increases the total without resetting elapsed.
+  // Extra seconds added on top of the base for this question's timer.
+  // Picked once per level on the level-start screen.
   extraSeconds: number
+  // When true, the timer is disabled — no countdown, no expiry. The bar
+  // renders a "no timer" indicator instead.
+  noTimer?: boolean
   // Identifier that changes when a new question starts so the bar resets.
   resetKey: string | number
   onExpire: () => void
@@ -14,6 +17,7 @@ interface TimerBarProps {
 export function TimerBar({
   baseSeconds,
   extraSeconds,
+  noTimer = false,
   resetKey,
   onExpire,
   paused = false,
@@ -40,6 +44,7 @@ export function TimerBar({
 
   // Run/pause the timer.
   useEffect(() => {
+    if (noTimer) return
     if (paused) {
       // Capture how far we got so resume picks up here.
       elapsedAtPauseRef.current = liveElapsedRef.current
@@ -68,7 +73,7 @@ export function TimerBar({
     }
     raf = requestAnimationFrame(tick)
     return () => cancelAnimationFrame(raf)
-  }, [paused, baseSeconds, resetKey])
+  }, [paused, baseSeconds, resetKey, noTimer])
 
   const remainingRatio = Math.max(0, 1 - elapsed / totalSeconds)
   const remainingSeconds = Math.max(0, totalSeconds - elapsed)
@@ -77,6 +82,23 @@ export function TimerBar({
   let color = '#1B8A4C'
   if (remainingRatio < 0.33) color = '#E8192C'
   else if (remainingRatio < 0.66) color = '#FFD000'
+
+  if (noTimer) {
+    return (
+      <div className="w-full">
+        <div className="flex items-center justify-between text-sm text-text-muted mb-1">
+          <span>Time</span>
+          <span className="text-baxi-blue font-semibold">No timer</span>
+        </div>
+        <div className="h-3 w-full rounded-pill bg-card-surface overflow-hidden border border-card-border">
+          <div
+            className="h-full rounded-pill bg-baxi-blue/40"
+            style={{ width: '100%' }}
+          />
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="w-full">

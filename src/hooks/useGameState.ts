@@ -15,7 +15,7 @@ import {
 export type Screen =
   | 'login'
   | 'mode-select'
-  | 'level-info'
+  | 'level-start'
   | 'question'
   | 'round-summary'
   | 'get-better'
@@ -44,7 +44,11 @@ export interface GameState {
   correctInRound: number
   question: Question | null
   feedback: FeedbackState | null
-  pendingLevelExample: Question | null
+  // Per-level timer settings, chosen on the level-start screen and applied to
+  // every question of that level. Reset on each new level (initial pick OR
+  // level-up).
+  levelExtraTimeSeconds: number
+  levelNoTimer: boolean
   // Set of wrong attempts within the current round; used to feed Get Better Mode.
   wrongAttemptsThisRound: WrongAttempt[]
   // Whether the child reached a new level during the current round.
@@ -62,7 +66,8 @@ const INITIAL_STATE: GameState = {
   correctInRound: 0,
   question: null,
   feedback: null,
-  pendingLevelExample: null,
+  levelExtraTimeSeconds: 0,
+  levelNoTimer: false,
   wrongAttemptsThisRound: [],
   leveledUpThisRound: false,
 }
@@ -118,23 +123,70 @@ export function useGameState() {
     [],
   )
 
+  // Picking a digit type lands on the level-start screen so the child can
+  // choose timer options before the first question. The level state (number
+  // count, streak, round counters) is initialized here so confirmLevelStart
+  // only needs to commit the timer choice and generate the first question.
   const startGame = useCallback((digitType: DigitType) => {
     setState((s) => {
       const numberCount = startCountFor(s.userRecord, digitType)
-      const question = generateQuestion(digitType, numberCount)
       return {
         ...s,
         digitType,
         currentNumberCount: numberCount,
         consecutiveCorrect: 0,
-        questionInRound: 1,
+        questionInRound: 0,
         correctInRound: 0,
-        question,
+        question: null,
         feedback: null,
-        pendingLevelExample: null,
+        levelExtraTimeSeconds: 0,
+        levelNoTimer: false,
         wrongAttemptsThisRound: [],
         leveledUpThisRound: false,
-        screen: 'question',
+        screen: 'level-start',
+      }
+    })
+  }, [])
+
+  // Commit the timer choice from the level-start screen and start the round.
+  const confirmLevelStart = useCallback(
+    (extraSeconds: number, noTimer: boolean) => {
+      setState((s) => {
+        if (!s.digitType) return s
+        const question = generateQuestion(s.digitType, s.currentNumberCount)
+        return {
+          ...s,
+          levelExtraTimeSeconds: extraSeconds,
+          levelNoTimer: noTimer,
+          questionInRound: 1,
+          correctInRound: 0,
+          question,
+          feedback: null,
+          wrongAttemptsThisRound: [],
+          leveledUpThisRound: false,
+          screen: 'question',
+        }
+      })
+    },
+    [],
+  )
+
+  // After a level-up round summary, "Next level" sends the child back to the
+  // level-start screen so they can re-pick timer options for the new level.
+  const startNextLevel = useCallback(() => {
+    setState((s) => {
+      if (!s.digitType) return s
+      return {
+        ...s,
+        questionInRound: 0,
+        correctInRound: 0,
+        question: null,
+        feedback: null,
+        levelExtraTimeSeconds: 0,
+        levelNoTimer: false,
+        wrongAttemptsThisRound: [],
+        leveledUpThisRound: false,
+        screen: 'level-start',
       }
     })
   }, [])
@@ -237,20 +289,6 @@ export function useGameState() {
     [advanceAfterFeedback],
   )
 
-  const continueFromLevelInfo = useCallback(() => {
-    setState((s) => {
-      if (!s.digitType) return s
-      const nextQuestion = generateQuestion(s.digitType, s.currentNumberCount)
-      return {
-        ...s,
-        pendingLevelExample: null,
-        question: nextQuestion,
-        questionInRound: s.questionInRound + 1,
-        screen: 'question',
-      }
-    })
-  }, [])
-
   const playAgain = useCallback(() => {
     setState((s) => {
       if (!s.digitType) return s
@@ -297,7 +335,8 @@ export function useGameState() {
       correctInRound: 0,
       question: null,
       feedback: null,
-      pendingLevelExample: null,
+      levelExtraTimeSeconds: 0,
+      levelNoTimer: false,
       wrongAttemptsThisRound: [],
       leveledUpThisRound: false,
       screen: 'mode-select',
@@ -331,10 +370,11 @@ export function useGameState() {
     () => ({
       login,
       startGame,
+      confirmLevelStart,
+      startNextLevel,
       submitAnswer,
       scheduleAdvance,
       advanceAfterFeedback,
-      continueFromLevelInfo,
       playAgain,
       enterGetBetterMode,
       exitGetBetterMode,
@@ -344,10 +384,11 @@ export function useGameState() {
     [
       login,
       startGame,
+      confirmLevelStart,
+      startNextLevel,
       submitAnswer,
       scheduleAdvance,
       advanceAfterFeedback,
-      continueFromLevelInfo,
       playAgain,
       enterGetBetterMode,
       exitGetBetterMode,

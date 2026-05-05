@@ -2,7 +2,7 @@ interface QuestionDisplayProps {
   // Signed numbers — negative means subtraction. First entry is the starting
   // value (always positive); remaining entries carry the operator via sign.
   numbers: number[]
-  // Compact mode shrinks sizing for previews (e.g., LevelInfoCard).
+  // Compact mode shrinks sizing for previews (e.g., Get Better Mode).
   compact?: boolean
 }
 

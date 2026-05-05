@@ -11,6 +11,10 @@ interface QuestionScreenProps {
   questionInRound: number
   consecutiveCorrect: number
   paused: boolean
+  // Level-level timer settings, picked once on the level-start screen and
+  // applied to every question of the level.
+  extraSeconds: number
+  noTimer: boolean
   onSubmit: (answer: number | null) => void
   onTimeout: () => void
   onExit: () => void
@@ -21,13 +25,13 @@ export function QuestionScreen({
   questionInRound,
   consecutiveCorrect,
   paused,
+  extraSeconds,
+  noTimer,
   onSubmit,
   onTimeout,
   onExit,
 }: QuestionScreenProps) {
   const [answer, setAnswer] = useState('')
-  const [extraSeconds, setExtraSeconds] = useState(0)
-  const [extraUses, setExtraUses] = useState(0)
   // The child must explicitly choose Speak or Type before answering. Both
   // modes hide the question and pause the timer. They're mutually exclusive.
   const [speakActive, setSpeakActive] = useState(false)
@@ -48,8 +52,6 @@ export function QuestionScreen({
 
   useEffect(() => {
     setAnswer('')
-    setExtraSeconds(0)
-    setExtraUses(0)
     setSpeakActive(false)
     setTypeActive(false)
     markSubmitted(false)
@@ -143,21 +145,11 @@ export function QuestionScreen({
     setTypeActive(true)
   }
 
-  const handleAddTime = () => {
-    if (submittedRef.current || paused) return
-    if (extraUses >= GAME_CONFIG.extraTimeMaxUsesPerQuestion) return
-    setExtraSeconds((s) => s + GAME_CONFIG.extraTimeBonusSeconds)
-    setExtraUses((u) => u + 1)
-  }
-
   const handleExit = () => {
     if (submittedRef.current) return
     speech.stopListening()
     onExit()
   }
-
-  const addTimeRemaining =
-    GAME_CONFIG.extraTimeMaxUsesPerQuestion - extraUses
 
   return (
     <div className="h-full flex flex-col overflow-hidden">
@@ -174,6 +166,7 @@ export function QuestionScreen({
         <TimerBar
           baseSeconds={question.timerSeconds}
           extraSeconds={extraSeconds}
+          noTimer={noTimer}
           resetKey={question.display}
           onExpire={handleTimeout}
           paused={isLocked}
@@ -263,19 +256,6 @@ export function QuestionScreen({
             className="min-h-touch rounded-btn font-bold text-base px-2 py-2 bg-magic-gold text-bg-navy active:scale-[0.99] transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Check
-          </button>
-          <button
-            onClick={handleAddTime}
-            disabled={submitted || paused || addTimeRemaining <= 0}
-            className="min-h-touch rounded-btn bg-magic-gold/20 text-magic-gold border border-magic-gold/40 font-bold text-sm px-2 py-2 active:scale-[0.99] transition-transform disabled:opacity-40 disabled:cursor-not-allowed"
-            title={`Add ${GAME_CONFIG.extraTimeBonusSeconds} seconds`}
-          >
-            +{GAME_CONFIG.extraTimeBonusSeconds}s
-            {addTimeRemaining > 0 && (
-              <span className="ml-1 text-magic-gold/70">
-                ({addTimeRemaining})
-              </span>
-            )}
           </button>
           <button
             onClick={handleExit}

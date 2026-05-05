@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { FeedbackOverlay } from './components/FeedbackOverlay'
 import { useGameState } from './hooks/useGameState'
 import { GetBetterScreen } from './screens/GetBetterScreen'
-import { LevelInfoCard } from './screens/LevelInfoCard'
+import { LevelStartScreen } from './screens/LevelStartScreen'
 import { LoginScreen } from './screens/LoginScreen'
 import { ModeSelectScreen } from './screens/ModeSelectScreen'
 import { QuestionScreen } from './screens/QuestionScreen'
@@ -36,11 +36,14 @@ export default function App() {
         />
       )}
 
-      {state.screen === 'level-info' && state.pendingLevelExample && (
-        <LevelInfoCard
-          newNumberCount={state.currentNumberCount}
-          example={state.pendingLevelExample}
-          onContinue={() => actions.continueFromLevelInfo()}
+      {state.screen === 'level-start' && state.digitType && (
+        <LevelStartScreen
+          digitType={state.digitType}
+          numberCount={state.currentNumberCount}
+          onConfirm={(extra, noTimer) =>
+            actions.confirmLevelStart(extra, noTimer)
+          }
+          onChangeDigitLevel={() => actions.changeDigitLevel()}
         />
       )}
 
@@ -50,6 +53,8 @@ export default function App() {
           questionInRound={state.questionInRound}
           consecutiveCorrect={state.consecutiveCorrect}
           paused={state.feedback != null}
+          extraSeconds={state.levelExtraTimeSeconds}
+          noTimer={state.levelNoTimer}
           onSubmit={(answer) => actions.submitAnswer(answer)}
           onTimeout={() => actions.submitAnswer(null)}
           onExit={() => actions.changeDigitLevel()}
@@ -65,6 +70,7 @@ export default function App() {
           leveledUpThisRound={state.leveledUpThisRound}
           wrongCount={state.wrongAttemptsThisRound.length}
           onPlayAgain={() => actions.playAgain()}
+          onStartNextLevel={() => actions.startNextLevel()}
           onChangeDigitLevel={() => actions.changeDigitLevel()}
           onGetBetter={() => actions.enterGetBetterMode()}
         />
