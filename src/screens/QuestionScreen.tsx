@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { AnswerInput } from '../components/AnswerInput'
-import { CoinCounter } from '../components/CoinCounter'
+import { CoinCounter, CoinSvg } from '../components/CoinCounter'
 import { QuestionDisplay } from '../components/QuestionDisplay'
 import { TimerBar } from '../components/TimerBar'
 import { GAME_CONFIG } from '../config/gameConfig'
@@ -14,6 +14,9 @@ interface QuestionScreenProps {
   // Lifetime coin total for the active user. Drives the header coin chip
   // which tweens up each time the value changes.
   coins: number
+  // Coins earned during the current round; ticks up after each correct
+  // answer. Surfaced in the header so the child sees their round haul grow.
+  coinsThisRound: number
   paused: boolean
   // Level-level timer settings, picked once on the level-start screen and
   // applied to every question of the level.
@@ -29,6 +32,7 @@ export function QuestionScreen({
   questionInRound,
   consecutiveCorrect,
   coins,
+  coinsThisRound,
   paused,
   extraSeconds,
   noTimer,
@@ -36,6 +40,35 @@ export function QuestionScreen({
   onTimeout,
   onExit,
 }: QuestionScreenProps) {
+  // We surface a transient "+N" callout above the round-coin pill when the
+  // child returns to the question screen after a correct-feedback overlay
+  // clears. Triggering on `paused` going true→false (rather than directly
+  // on coinsThisRound) means the animation actually plays at a moment when
+  // the header is visible — during feedback the overlay covers it.
+  const seenRoundCoinsRef = useRef(coinsThisRound)
+  const prevPausedRef = useRef(paused)
+  const [lastEarned, setLastEarned] = useState(0)
+  const [lastEarnedTick, setLastEarnedTick] = useState(0)
+  useEffect(() => {
+    const wasPaused = prevPausedRef.current
+    prevPausedRef.current = paused
+    if (wasPaused && !paused) {
+      const delta = coinsThisRound - seenRoundCoinsRef.current
+      seenRoundCoinsRef.current = coinsThisRound
+      if (delta > 0) {
+        setLastEarned(delta)
+        setLastEarnedTick((t) => t + 1)
+        const t = window.setTimeout(() => setLastEarned(0), 1300)
+        return () => window.clearTimeout(t)
+      }
+    }
+    // Round reset (coins went down, e.g., new round starts at 0): re-anchor
+    // the snapshot so the next earn fires a delta correctly.
+    if (coinsThisRound < seenRoundCoinsRef.current) {
+      seenRoundCoinsRef.current = coinsThisRound
+    }
+  }, [paused, coinsThisRound])
+
   const [answer, setAnswer] = useState('')
   // The child must explicitly choose Speak or Type before answering. Both
   // modes hide the question and pause the timer. They're mutually exclusive.
@@ -193,6 +226,23 @@ export function QuestionScreen({
         <div className="flex items-center gap-2">
           <span className="text-magic-gold font-bold">
             ✓ {consecutiveCorrect}
+          </span>
+          <span
+            key={`round-${lastEarnedTick}`}
+            className="relative inline-flex items-center gap-1 rounded-pill bg-magic-gold/20 border border-magic-gold/60 px-2 py-0.5 text-xs font-extrabold text-magic-gold tabular-nums animate-round-coin-pulse"
+            aria-label={`${coinsThisRound} coins this round`}
+            title="Coins this round"
+          >
+            <CoinSvg size={14} />
+            {coinsThisRound}
+            {lastEarned > 0 && (
+              <span
+                key={`bump-${lastEarnedTick}`}
+                className="absolute -top-1 right-1 text-[12px] font-black text-magic-gold animate-earned-bump pointer-events-none drop-shadow"
+              >
+                +{lastEarned}
+              </span>
+            )}
           </span>
           <CoinCounter coins={coins} compact />
         </div>

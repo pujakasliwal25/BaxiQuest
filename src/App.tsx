@@ -70,6 +70,7 @@ export default function App() {
           questionInRound={state.questionInRound}
           consecutiveCorrect={state.consecutiveCorrect}
           coins={state.userRecord?.coins ?? 0}
+          coinsThisRound={state.coinsThisRound}
           paused={state.feedback != null}
           extraSeconds={state.levelExtraTimeSeconds}
           noTimer={state.levelNoTimer}

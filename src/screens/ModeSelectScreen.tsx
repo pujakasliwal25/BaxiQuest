@@ -41,7 +41,7 @@ export function ModeSelectScreen({
             Hi {name}!<br />Ready to quest?
           </h1>
         </div>
-        <div className="shrink-0">
+        <div className="shrink-0 animate-baxi-idle inline-block">
           <Baxi size={84} />
         </div>
       </div>
