@@ -1,6 +1,8 @@
 import {
+  collection,
   doc,
   getDoc,
+  getDocs,
   serverTimestamp,
   setDoc,
 } from 'firebase/firestore'
@@ -263,6 +265,40 @@ export async function loadKnownCurriculumLevel(
   const local = loadFromLocalStorage(userKey)
   if (local) return local.curriculumLevel
   return null
+}
+
+// Admin: fetch every user record from Firestore. Returns an empty list if
+// Firestore isn't configured.
+export async function loadAllUsers(): Promise<UserRecord[]> {
+  const db = getDb()
+  if (!db) return []
+  try {
+    const snap = await getDocs(collection(db, 'users'))
+    const out: UserRecord[] = []
+    snap.forEach((d) => {
+      const data = d.data() as
+        | (Partial<UserRecord> & {
+            curriculumLevel?: unknown
+            cellStats?: unknown
+          })
+        | undefined
+      if (!data) return
+      out.push({
+        userKey: d.id,
+        name: data.name ?? '',
+        classCode: data.classCode ?? '',
+        curriculumLevel: isCurriculumLevel(data.curriculumLevel)
+          ? data.curriculumLevel
+          : 'F1',
+        progress: data.progress ?? {},
+        cellStats: normalizeCellStats(data.cellStats),
+      })
+    })
+    return out
+  } catch (err) {
+    console.warn('[progressStore] admin load all failed:', err)
+    return []
+  }
 }
 
 export async function saveProgress(

@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { FeedbackOverlay } from './components/FeedbackOverlay'
 import { useGameState } from './hooks/useGameState'
+import { AdminScreen } from './screens/AdminScreen'
 import { GetBetterScreen } from './screens/GetBetterScreen'
 import { LevelStartScreen } from './screens/LevelStartScreen'
 import { LoginScreen } from './screens/LoginScreen'
@@ -28,6 +29,10 @@ export default function App() {
         <LoginScreen
           onSubmit={(code, name, level) => actions.login(code, name, level)}
         />
+      )}
+
+      {state.screen === 'admin' && (
+        <AdminScreen onLogout={() => actions.logout()} />
       )}
 
       {state.screen === 'mode-select' && (

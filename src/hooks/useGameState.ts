@@ -29,6 +29,7 @@ export type Screen =
   | 'round-summary'
   | 'redo-complete'
   | 'get-better'
+  | 'admin'
 
 export interface FeedbackState {
   kind: 'correct' | 'wrong'
@@ -129,6 +130,19 @@ export function useGameState() {
       curriculumLevel: CurriculumLevel,
     ): Promise<boolean> => {
       const normalized = classCode.trim().toUpperCase()
+      const isAdminCode = GAME_CONFIG.adminClassCodes
+        .map((c) => c.toUpperCase())
+        .includes(normalized)
+      if (isAdminCode) {
+        // Admin sign-in skips the user-record flow — admins don't have
+        // their own stats or progress. We just route to the admin screen.
+        setState((s) => ({
+          ...s,
+          name: name.trim() || 'Admin',
+          screen: 'admin',
+        }))
+        return true
+      }
       const valid = GAME_CONFIG.validClassCodes
         .map((c) => c.toUpperCase())
         .includes(normalized)

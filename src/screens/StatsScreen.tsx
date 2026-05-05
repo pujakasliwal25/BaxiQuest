@@ -28,7 +28,16 @@ import {
 interface StatsScreenProps {
   userRecord: UserRecord | null
   onBack: () => void
-  onRedo: (digitType: DigitType, numberCount: number) => void
+  // Pass null to hide the Redo button in cell detail (admin viewing a
+  // student's scorecard shouldn't be able to start practice rounds for
+  // them).
+  onRedo: ((digitType: DigitType, numberCount: number) => void) | null
+  // Header text. Defaults to "Stats". Admin viewing a student passes
+  // e.g. "Aarav's scorecard".
+  headerLabel?: string
+  // When false, the Leaderboard tab is hidden and Scorecard is the only
+  // view. Defaults to true (the child's own Stats screen has both tabs).
+  showLeaderboard?: boolean
 }
 
 type StatsTab = 'scorecard' | 'leaderboard'
@@ -71,6 +80,8 @@ export function StatsScreen({
   userRecord,
   onBack,
   onRedo,
+  headerLabel = 'Stats',
+  showLeaderboard = true,
 }: StatsScreenProps) {
   const [tab, setTab] = useState<StatsTab>('scorecard')
   const [selected, setSelected] = useState<{
@@ -91,41 +102,43 @@ export function StatsScreen({
         >
           ← Back
         </button>
-        <h1 className="text-lg font-bold">Stats</h1>
+        <h1 className="text-lg font-bold truncate px-2">{headerLabel}</h1>
         <span className="w-12" />
       </div>
 
-      <div className="flex gap-2 px-4 mb-3 shrink-0">
-        <button
-          onClick={() => setTab('scorecard')}
-          className={`flex-1 min-h-touch rounded-pill text-sm font-bold transition-colors ${
-            tab === 'scorecard'
-              ? 'bg-magic-gold text-bg-navy'
-              : 'bg-card-surface border border-card-border text-white'
-          }`}
-        >
-          Scorecard
-        </button>
-        <button
-          onClick={() => setTab('leaderboard')}
-          className={`flex-1 min-h-touch rounded-pill text-sm font-bold transition-colors ${
-            tab === 'leaderboard'
-              ? 'bg-magic-gold text-bg-navy'
-              : 'bg-card-surface border border-card-border text-white'
-          }`}
-        >
-          Leaderboard
-        </button>
-      </div>
+      {showLeaderboard && (
+        <div className="flex gap-2 px-4 mb-3 shrink-0">
+          <button
+            onClick={() => setTab('scorecard')}
+            className={`flex-1 min-h-touch rounded-pill text-sm font-bold transition-colors ${
+              tab === 'scorecard'
+                ? 'bg-magic-gold text-bg-navy'
+                : 'bg-card-surface border border-card-border text-white'
+            }`}
+          >
+            Scorecard
+          </button>
+          <button
+            onClick={() => setTab('leaderboard')}
+            className={`flex-1 min-h-touch rounded-pill text-sm font-bold transition-colors ${
+              tab === 'leaderboard'
+                ? 'bg-magic-gold text-bg-navy'
+                : 'bg-card-surface border border-card-border text-white'
+            }`}
+          >
+            Leaderboard
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 min-h-0 overflow-y-auto px-2 pb-4">
-        {tab === 'scorecard' ? (
+        {showLeaderboard && tab === 'leaderboard' ? (
+          <LeaderboardMatrix />
+        ) : (
           <ScorecardMatrix
             userRecord={userRecord}
             onSelectCell={(dt, nc) => setSelected({ dt, nc })}
           />
-        ) : (
-          <LeaderboardMatrix />
         )}
       </div>
 
@@ -135,12 +148,16 @@ export function StatsScreen({
           numberCount={selected.nc}
           stat={selectedStat}
           onClose={() => setSelected(null)}
-          onRedo={() => {
-            const dt = selected.dt
-            const nc = selected.nc
-            setSelected(null)
-            onRedo(dt, nc)
-          }}
+          onRedo={
+            onRedo
+              ? () => {
+                  const dt = selected.dt
+                  const nc = selected.nc
+                  setSelected(null)
+                  onRedo(dt, nc)
+                }
+              : null
+          }
         />
       )}
     </div>
@@ -242,7 +259,8 @@ function CellDetailModal({
   numberCount: number
   stat: CellStat | undefined
   onClose: () => void
-  onRedo: () => void
+  // Null = read-only (admin viewing a student). Hides the Redo button.
+  onRedo: (() => void) | null
 }) {
   return (
     <div
@@ -297,19 +315,19 @@ function CellDetailModal({
           <p className="text-text-muted text-sm mb-4">No attempts yet.</p>
         )}
 
-        {(stat?.attempts ?? 0) > 0 ? (
+        {onRedo && (stat?.attempts ?? 0) > 0 ? (
           <button
             onClick={onRedo}
             className="w-full min-h-touch bg-magic-gold text-bg-navy font-bold text-base rounded-btn px-4 py-3 active:scale-[0.99] transition-transform"
           >
             {stat?.cleared ? 'Redo to improve avg' : 'Play this level again'}
           </button>
-        ) : (
+        ) : onRedo && (stat?.attempts ?? 0) === 0 ? (
           <p className="text-text-muted text-xs text-center">
             You haven't reached this level yet — work your way up from your
             current level to unlock it.
           </p>
-        )}
+        ) : null}
       </div>
     </div>
   )
