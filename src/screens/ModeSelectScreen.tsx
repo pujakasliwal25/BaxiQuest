@@ -1,5 +1,9 @@
 import { Baxi } from '../components/Baxi'
-import type { DigitProgress } from '../services/progressStore'
+import {
+  avgMsAt,
+  type DigitProgress,
+  type UserRecord,
+} from '../services/progressStore'
 import {
   ALL_DIGIT_TYPES,
   DIGIT_TYPE_LABELS,
@@ -9,12 +13,20 @@ import {
 interface ModeSelectScreenProps {
   name: string
   progress: DigitProgress
+  userRecord: UserRecord | null
   onPickDigitType: (digitType: DigitType) => void
+}
+
+function formatAvgSeconds(ms: number): string {
+  const sec = ms / 1000
+  if (sec < 10) return `${sec.toFixed(1)}s`
+  return `${Math.round(sec)}s`
 }
 
 export function ModeSelectScreen({
   name,
   progress,
+  userRecord,
   onPickDigitType,
 }: ModeSelectScreenProps) {
   return (
@@ -47,13 +59,19 @@ export function ModeSelectScreen({
         <div className="grid grid-cols-2 gap-3">
           {ALL_DIGIT_TYPES.map((dt) => {
             const best = progress[dt] ?? 0
+            const avgMs = best > 0 ? avgMsAt(userRecord, dt, best) : null
             return (
               <button
                 key={dt}
                 onClick={() => onPickDigitType(dt)}
-                className="relative min-h-touch rounded-pill border border-card-border bg-card-surface text-white font-semibold px-4 py-3 text-base hover:bg-magic-gold hover:text-bg-navy hover:border-magic-gold focus:bg-magic-gold focus:text-bg-navy focus:border-magic-gold transition-colors active:scale-[0.99]"
+                className="relative min-h-touch rounded-card border border-card-border bg-card-surface text-white font-semibold px-3 py-3 text-base hover:bg-magic-gold hover:text-bg-navy hover:border-magic-gold focus:bg-magic-gold focus:text-bg-navy focus:border-magic-gold transition-colors active:scale-[0.99] flex flex-col items-center justify-center gap-1"
               >
-                {DIGIT_TYPE_LABELS[dt]}
+                <span>{DIGIT_TYPE_LABELS[dt]}</span>
+                {avgMs != null && (
+                  <span className="text-[11px] font-normal opacity-80">
+                    {best}R · avg {formatAvgSeconds(avgMs)}
+                  </span>
+                )}
                 {best > 0 && (
                   <span className="absolute -top-2 -right-1 bg-magic-gold text-bg-navy text-xs font-bold rounded-pill px-2 py-0.5 border border-bg-navy">
                     {best}

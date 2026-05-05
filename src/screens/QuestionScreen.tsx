@@ -15,8 +15,8 @@ interface QuestionScreenProps {
   // applied to every question of the level.
   extraSeconds: number
   noTimer: boolean
-  onSubmit: (answer: number | null) => void
-  onTimeout: () => void
+  onSubmit: (answer: number | null, elapsedMs: number) => void
+  onTimeout: (elapsedMs: number) => void
   onExit: () => void
 }
 
@@ -49,6 +49,11 @@ export function QuestionScreen({
   const wasListeningRef = useRef(false)
   const onSubmitRef = useRef(onSubmit)
   onSubmitRef.current = onSubmit
+  // Wall-clock timestamp captured when this question first appeared. Used to
+  // compute elapsed time on submit/timeout for the per-level avg-time stat.
+  const questionStartedAtRef = useRef<number>(performance.now())
+  const elapsedSinceStart = () =>
+    Math.max(0, performance.now() - questionStartedAtRef.current)
 
   useEffect(() => {
     setAnswer('')
@@ -57,6 +62,7 @@ export function QuestionScreen({
     markSubmitted(false)
     wasListeningRef.current = false
     speech.reset()
+    questionStartedAtRef.current = performance.now()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [question])
 
@@ -65,11 +71,12 @@ export function QuestionScreen({
     if (submittedRef.current) return
     if (speech.parsedNumber == null) return
     const value = speech.parsedNumber
+    const elapsed = elapsedSinceStart()
     markSubmitted(true)
     setAnswer(String(value))
     setSpeakActive(false)
     speech.stopListening()
-    onSubmitRef.current(value)
+    onSubmitRef.current(value, elapsed)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [speakActive, speech.parsedNumber])
 
@@ -102,20 +109,22 @@ export function QuestionScreen({
     if (!typeActive) return
     if (paused) return
     if (answer.trim() === '') return
+    const elapsed = elapsedSinceStart()
     markSubmitted(true)
     setTypeActive(false)
     speech.stopListening()
     const parsed = parseInt(answer, 10)
-    onSubmit(Number.isNaN(parsed) ? null : parsed)
+    onSubmit(Number.isNaN(parsed) ? null : parsed, elapsed)
   }
 
   const handleTimeout = () => {
     if (submittedRef.current) return
+    const elapsed = elapsedSinceStart()
     markSubmitted(true)
     setTypeActive(false)
     setSpeakActive(false)
     speech.stopListening()
-    onTimeout()
+    onTimeout(elapsed)
   }
 
   const handleSpeak = () => {

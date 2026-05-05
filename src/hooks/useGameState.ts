@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GAME_CONFIG } from '../config/gameConfig'
 import {
   buildUserKey,
+  recordTime,
   recordUser,
   saveProgress,
   type UserRecord,
@@ -109,6 +110,7 @@ export function useGameState() {
           name: trimmedName,
           classCode: normalized,
           progress: {},
+          timeStats: {},
         }
       }
 
@@ -191,9 +193,27 @@ export function useGameState() {
     })
   }, [])
 
-  const submitAnswer = useCallback((userAnswer: number | null) => {
+  // `elapsedMs` is wall-clock time the child spent on this question. Used to
+  // build a per-(digitType, numberCount) average displayed on Mode Select.
+  // Pass null when the elapsed time is unreliable (e.g., a programmatic
+  // timeout where the child wasn't actively engaged).
+  const submitAnswer = useCallback(
+    (userAnswer: number | null, elapsedMs: number | null = null) => {
+    // Captured inside the updater so the outer post-setState side effect can
+    // fire exactly once even under React strict-mode's double-invocation.
+    let timeStatRecord: {
+      rec: UserRecord
+      digitType: DigitType
+      numberCount: number
+      elapsedMs: number
+    } | null = null
     setState((s) => {
       if (!s.question || !s.digitType) return s
+      // Capture digit type + number count BEFORE potentially leveling up so
+      // we record the stat against the level the question was actually asked
+      // at, not the new level.
+      const statDigitType = s.digitType
+      const statNumberCount = s.currentNumberCount
       const isCorrect = userAnswer != null && userAnswer === s.question.answer
       let consecutiveCorrect = isCorrect ? s.consecutiveCorrect + 1 : 0
       let currentNumberCount = s.currentNumberCount
@@ -237,6 +257,15 @@ export function useGameState() {
         newNumberCount,
       }
 
+      if (elapsedMs != null && s.userRecord) {
+        timeStatRecord = {
+          rec: s.userRecord,
+          digitType: statDigitType,
+          numberCount: statNumberCount,
+          elapsedMs,
+        }
+      }
+
       return {
         ...s,
         consecutiveCorrect,
@@ -247,7 +276,26 @@ export function useGameState() {
         feedback,
       }
     })
-  }, [])
+    if (timeStatRecord) {
+      const r: {
+        rec: UserRecord
+        digitType: DigitType
+        numberCount: number
+        elapsedMs: number
+      } = timeStatRecord
+      void recordTime(r.rec, r.digitType, r.numberCount, r.elapsedMs).then(
+        (updated) => {
+          setState((cur) =>
+            cur.userRecord?.userKey === updated.userKey
+              ? { ...cur, userRecord: updated }
+              : cur,
+          )
+        },
+      )
+    }
+  },
+  [],
+  )
 
   const advanceAfterFeedback = useCallback(() => {
     clearFeedbackTimer()

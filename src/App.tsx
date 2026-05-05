@@ -32,6 +32,7 @@ export default function App() {
         <ModeSelectScreen
           name={state.name}
           progress={state.userRecord?.progress ?? {}}
+          userRecord={state.userRecord}
           onPickDigitType={(dt) => actions.startGame(dt)}
         />
       )}
@@ -55,8 +56,10 @@ export default function App() {
           paused={state.feedback != null}
           extraSeconds={state.levelExtraTimeSeconds}
           noTimer={state.levelNoTimer}
-          onSubmit={(answer) => actions.submitAnswer(answer)}
-          onTimeout={() => actions.submitAnswer(null)}
+          onSubmit={(answer, elapsedMs) =>
+            actions.submitAnswer(answer, elapsedMs)
+          }
+          onTimeout={(elapsedMs) => actions.submitAnswer(null, elapsedMs)}
           onExit={() => actions.changeDigitLevel()}
         />
       )}

@@ -9,11 +9,23 @@ import { getDb } from './firebase'
 
 export type DigitProgress = Partial<Record<DigitType, number>>
 
+// Aggregate timing per (digitType, numberCount). Stored as `${digitType}:${numberCount}` so it serializes cleanly to localStorage and Firestore as a flat record.
+export interface TimeStat {
+  totalMs: number
+  count: number
+}
+export type TimeStats = Record<string, TimeStat>
+
+export function timeStatKey(digitType: DigitType, numberCount: number): string {
+  return `${digitType}:${numberCount}`
+}
+
 export interface UserRecord {
   userKey: string
   name: string
   classCode: string
   progress: DigitProgress
+  timeStats: TimeStats
 }
 
 const LS_PREFIX = 'baxiquest:user:'
@@ -56,6 +68,7 @@ async function loadFromFirestore(userKey: string): Promise<UserRecord | null> {
       name: data.name ?? '',
       classCode: data.classCode ?? '',
       progress: data.progress ?? {},
+      timeStats: data.timeStats ?? {},
     }
   } catch (err) {
     console.warn('[progressStore] firestore load failed:', err)
@@ -98,6 +111,7 @@ export async function recordUser(
     name: name.trim() || existing?.name || '',
     classCode: classCode.trim().toUpperCase() || existing?.classCode || '',
     progress: existing?.progress ?? {},
+    timeStats: existing?.timeStats ?? {},
   }
 
   saveToLocalStorage(merged)
@@ -105,6 +119,7 @@ export async function recordUser(
     name: merged.name,
     classCode: merged.classCode,
     progress: merged.progress,
+    timeStats: merged.timeStats,
   })
 
   return merged
@@ -127,4 +142,39 @@ export async function saveProgress(
   void saveToFirestore(updated, { progress: updated.progress })
 
   return updated
+}
+
+export async function recordTime(
+  rec: UserRecord,
+  digitType: DigitType,
+  numberCount: number,
+  elapsedMs: number,
+): Promise<UserRecord> {
+  if (!Number.isFinite(elapsedMs) || elapsedMs < 0) return rec
+  const key = timeStatKey(digitType, numberCount)
+  const prev = rec.timeStats[key] ?? { totalMs: 0, count: 0 }
+  const next: TimeStat = {
+    totalMs: prev.totalMs + elapsedMs,
+    count: prev.count + 1,
+  }
+  const updated: UserRecord = {
+    ...rec,
+    timeStats: { ...rec.timeStats, [key]: next },
+  }
+
+  saveToLocalStorage(updated)
+  void saveToFirestore(updated, { timeStats: updated.timeStats })
+
+  return updated
+}
+
+export function avgMsAt(
+  rec: UserRecord | null,
+  digitType: DigitType,
+  numberCount: number,
+): number | null {
+  if (!rec) return null
+  const stat = rec.timeStats[timeStatKey(digitType, numberCount)]
+  if (!stat || stat.count === 0) return null
+  return stat.totalMs / stat.count
 }
