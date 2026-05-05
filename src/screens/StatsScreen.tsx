@@ -500,6 +500,28 @@ function Stat({
   )
 }
 
+function attemptAvgCorrectMs(attempt: AttemptDetail): number | null {
+  const corrects = attempt.questions.filter((q) => q.correct)
+  if (corrects.length === 0) return null
+  const sum = corrects.reduce((s, q) => s + q.ms, 0)
+  return sum / corrects.length
+}
+
+function attemptBestThreeAvgMs(attempt: AttemptDetail): number | null {
+  let best: number | null = null
+  const qs = attempt.questions
+  for (let i = 0; i + 2 < qs.length; i++) {
+    const a = qs[i]
+    const b = qs[i + 1]
+    const c = qs[i + 2]
+    if (a.correct && b.correct && c.correct) {
+      const avg = (a.ms + b.ms + c.ms) / 3
+      if (best == null || avg < best) best = avg
+    }
+  }
+  return best
+}
+
 function AttemptHistory({ history }: { history: AttemptDetail[] }) {
   // Newest first so the most recent attempt is at the top, matching the way
   // a child would naturally scan their history.
@@ -525,18 +547,48 @@ function AttemptHistory({ history }: { history: AttemptDetail[] }) {
           const correct = attempt.questions.filter((q) => q.correct).length
           const total = attempt.questions.length
           const isBestAttempt = best?.attemptIndex === originalIdx
+          const avgCorrect = attemptAvgCorrectMs(attempt)
+          const bestThree = attemptBestThreeAvgMs(attempt)
           return (
             <div
               key={attempt.startedAt}
               className="rounded-card bg-bg-navy border border-card-border p-2"
             >
-              <div className="flex items-center justify-between mb-1.5 text-[11px]">
+              <div className="flex items-center justify-between mb-1 text-[11px]">
                 <span className="font-semibold">
                   Attempt #{originalIdx + 1}
                 </span>
                 <span className="text-text-muted">
-                  {fmtDate(attempt.startedAt)} · {correct}/{total}
+                  {fmtDate(attempt.startedAt)}
                 </span>
+              </div>
+              <div className="flex items-center gap-3 text-[10px] text-text-muted mb-1.5 flex-wrap">
+                <span>
+                  <span className="text-white font-semibold tabular-nums">
+                    {correct}/{total}
+                  </span>{' '}
+                  correct
+                </span>
+                {avgCorrect != null && (
+                  <span>
+                    avg{' '}
+                    <span className="text-white font-semibold tabular-nums">
+                      {fmtMs(avgCorrect)}
+                    </span>
+                  </span>
+                )}
+                {bestThree != null && (
+                  <span>
+                    best&nbsp;3{' '}
+                    <span
+                      className={`font-semibold tabular-nums ${
+                        isBestAttempt ? 'text-magic-gold' : 'text-white'
+                      }`}
+                    >
+                      {fmtMs(bestThree)}
+                    </span>
+                  </span>
+                )}
               </div>
               <div className="flex flex-wrap gap-1">
                 {attempt.questions.map((q, qIdx) => {
