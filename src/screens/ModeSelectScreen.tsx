@@ -1,7 +1,8 @@
 import { Baxi } from '../components/Baxi'
 import {
-  avgMsAt,
   type DigitProgress,
+  getCellStat,
+  headlineAvgMs,
   type UserRecord,
 } from '../services/progressStore'
 import {
@@ -59,7 +60,10 @@ export function ModeSelectScreen({
         <div className="grid grid-cols-2 gap-3">
           {ALL_DIGIT_TYPES.map((dt) => {
             const best = progress[dt] ?? 0
-            const avgMs = best > 0 ? avgMsAt(userRecord, dt, best) : null
+            const avgMs =
+              best > 0
+                ? headlineAvgMs(getCellStat(userRecord, dt, best))
+                : null
             return (
               <button
                 key={dt}

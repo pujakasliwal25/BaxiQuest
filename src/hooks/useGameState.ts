@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { GAME_CONFIG } from '../config/gameConfig'
 import {
   buildUserKey,
-  recordTime,
+  recordCellAnswer,
+  recordCellAttemptStart,
   recordUser,
   saveProgress,
   type UserRecord,
@@ -42,6 +43,10 @@ export interface GameState {
   digitType: DigitType | null
   currentNumberCount: number
   consecutiveCorrect: number
+  // Rolling window of elapsed times for the current consecutive-correct
+  // streak. Resets on a wrong answer. When this reaches 3, we have a
+  // "3-in-a-row" sample that may update bestThreeInARowAvgMs at the cell.
+  streakCorrectMs: number[]
   questionInRound: number
   correctInRound: number
   question: Question | null
@@ -64,6 +69,7 @@ const INITIAL_STATE: GameState = {
   digitType: null,
   currentNumberCount: GAME_CONFIG.startNumberCount,
   consecutiveCorrect: 0,
+  streakCorrectMs: [],
   questionInRound: 0,
   correctInRound: 0,
   question: null,
@@ -121,7 +127,7 @@ export function useGameState() {
           classCode: normalized,
           curriculumLevel,
           progress: {},
-          timeStats: {},
+          cellStats: {},
         }
       }
 
@@ -148,6 +154,7 @@ export function useGameState() {
         digitType,
         currentNumberCount: numberCount,
         consecutiveCorrect: 0,
+        streakCorrectMs: [],
         questionInRound: 0,
         correctInRound: 0,
         question: null,
@@ -164,13 +171,27 @@ export function useGameState() {
   // Commit the timer choice from the level-start screen and start the round.
   const confirmLevelStart = useCallback(
     (extraSeconds: number, noTimer: boolean) => {
+      let pendingAttempt: {
+        rec: UserRecord
+        digitType: DigitType
+        numberCount: number
+      } | null = null
       setState((s) => {
         if (!s.digitType) return s
         const question = generateQuestion(s.digitType, s.currentNumberCount)
+        if (s.userRecord) {
+          pendingAttempt = {
+            rec: s.userRecord,
+            digitType: s.digitType,
+            numberCount: s.currentNumberCount,
+          }
+        }
         return {
           ...s,
           levelExtraTimeSeconds: extraSeconds,
           levelNoTimer: noTimer,
+          consecutiveCorrect: 0,
+          streakCorrectMs: [],
           questionInRound: 1,
           correctInRound: 0,
           question,
@@ -180,6 +201,22 @@ export function useGameState() {
           screen: 'question',
         }
       })
+      if (pendingAttempt) {
+        const a: {
+          rec: UserRecord
+          digitType: DigitType
+          numberCount: number
+        } = pendingAttempt
+        void recordCellAttemptStart(a.rec, a.digitType, a.numberCount).then(
+          (updated) => {
+            setState((cur) =>
+              cur.userRecord?.userKey === updated.userKey
+                ? { ...cur, userRecord: updated }
+                : cur,
+            )
+          },
+        )
+      }
     },
     [],
   )
@@ -191,6 +228,8 @@ export function useGameState() {
       if (!s.digitType) return s
       return {
         ...s,
+        consecutiveCorrect: 0,
+        streakCorrectMs: [],
         questionInRound: 0,
         correctInRound: 0,
         question: null,
@@ -204,49 +243,68 @@ export function useGameState() {
     })
   }, [])
 
-  // `elapsedMs` is wall-clock time the child spent on this question. Used to
-  // build a per-(digitType, numberCount) average displayed on Mode Select.
-  // Pass null when the elapsed time is unreliable (e.g., a programmatic
-  // timeout where the child wasn't actively engaged).
+  // `elapsedMs` is wall-clock time the child spent on this question. Drives
+  // the per-cell stats (correct/wrong counts, top-10 fastest, best 3-in-a-row
+  // avg, last-10 buffer). Pass null only when the elapsed time is genuinely
+  // unknown — every real submit/timeout should pass a number.
   const submitAnswer = useCallback(
     (userAnswer: number | null, elapsedMs: number | null = null) => {
     // Captured inside the updater so the outer post-setState side effect can
     // fire exactly once even under React strict-mode's double-invocation.
-    let timeStatRecord: {
+    let pendingPersist: {
       rec: UserRecord
       digitType: DigitType
       numberCount: number
       elapsedMs: number
+      correct: boolean
+      threeInARowAvgMs?: number
+      triggeredLevelUp: boolean
     } | null = null
     setState((s) => {
       if (!s.question || !s.digitType) return s
       // Capture digit type + number count BEFORE potentially leveling up so
-      // we record the stat against the level the question was actually asked
-      // at, not the new level.
+      // stats are recorded against the cell the question was actually asked
+      // at, not the next one.
       const statDigitType = s.digitType
       const statNumberCount = s.currentNumberCount
       const isCorrect = userAnswer != null && userAnswer === s.question.answer
+
+      // Roll the per-streak elapsed buffer in lockstep with consecutiveCorrect
+      // so we can emit a 3-in-a-row sample at the same moment the streak
+      // counter resets.
+      let nextStreakMs = isCorrect && elapsedMs != null
+        ? [...s.streakCorrectMs, elapsedMs]
+        : []
+      if (nextStreakMs.length > GAME_CONFIG.correctInARowNeeded) {
+        nextStreakMs = nextStreakMs.slice(-GAME_CONFIG.correctInARowNeeded)
+      }
+
       let consecutiveCorrect = isCorrect ? s.consecutiveCorrect + 1 : 0
       let currentNumberCount = s.currentNumberCount
       let leveledUp = false
       let newNumberCount: number | undefined
+      let threeInARowAvgMs: number | undefined
 
+      const hitThreeInARow =
+        isCorrect && consecutiveCorrect >= GAME_CONFIG.correctInARowNeeded
+      if (hitThreeInARow && nextStreakMs.length === 3) {
+        threeInARowAvgMs =
+          (nextStreakMs[0] + nextStreakMs[1] + nextStreakMs[2]) / 3
+      }
       if (
-        isCorrect &&
-        consecutiveCorrect >= GAME_CONFIG.correctInARowNeeded &&
+        hitThreeInARow &&
         currentNumberCount < GAME_CONFIG.maxNumberCount
       ) {
         consecutiveCorrect = 0
         currentNumberCount = currentNumberCount + 1
         leveledUp = true
         newNumberCount = currentNumberCount
-      } else if (
-        isCorrect &&
-        consecutiveCorrect >= GAME_CONFIG.correctInARowNeeded &&
-        currentNumberCount >= GAME_CONFIG.maxNumberCount
-      ) {
-        // Cap reached: keep streak rolling without resetting (already at max).
+        nextStreakMs = []
+      } else if (hitThreeInARow) {
+        // Cap reached: still reset the streak so subsequent 3-in-a-rows count
+        // as separate samples.
         consecutiveCorrect = 0
+        nextStreakMs = []
       }
 
       const correctInRound = isCorrect ? s.correctInRound + 1 : s.correctInRound
@@ -269,17 +327,21 @@ export function useGameState() {
       }
 
       if (elapsedMs != null && s.userRecord) {
-        timeStatRecord = {
+        pendingPersist = {
           rec: s.userRecord,
           digitType: statDigitType,
           numberCount: statNumberCount,
           elapsedMs,
+          correct: isCorrect,
+          threeInARowAvgMs,
+          triggeredLevelUp: leveledUp,
         }
       }
 
       return {
         ...s,
         consecutiveCorrect,
+        streakCorrectMs: nextStreakMs,
         currentNumberCount,
         correctInRound,
         wrongAttemptsThisRound,
@@ -287,22 +349,28 @@ export function useGameState() {
         feedback,
       }
     })
-    if (timeStatRecord) {
+    if (pendingPersist) {
       const r: {
         rec: UserRecord
         digitType: DigitType
         numberCount: number
         elapsedMs: number
-      } = timeStatRecord
-      void recordTime(r.rec, r.digitType, r.numberCount, r.elapsedMs).then(
-        (updated) => {
-          setState((cur) =>
-            cur.userRecord?.userKey === updated.userKey
-              ? { ...cur, userRecord: updated }
-              : cur,
-          )
-        },
-      )
+        correct: boolean
+        threeInARowAvgMs?: number
+        triggeredLevelUp: boolean
+      } = pendingPersist
+      void recordCellAnswer(r.rec, r.digitType, r.numberCount, {
+        correct: r.correct,
+        elapsedMs: r.elapsedMs,
+        threeInARowAvgMs: r.threeInARowAvgMs,
+        triggeredLevelUp: r.triggeredLevelUp,
+      }).then((updated) => {
+        setState((cur) =>
+          cur.userRecord?.userKey === updated.userKey
+            ? { ...cur, userRecord: updated }
+            : cur,
+        )
+      })
     }
   },
   [],
@@ -349,11 +417,25 @@ export function useGameState() {
   )
 
   const playAgain = useCallback(() => {
+    let pendingAttempt: {
+      rec: UserRecord
+      digitType: DigitType
+      numberCount: number
+    } | null = null
     setState((s) => {
       if (!s.digitType) return s
       const nextQuestion = generateQuestion(s.digitType, s.currentNumberCount)
+      if (s.userRecord) {
+        pendingAttempt = {
+          rec: s.userRecord,
+          digitType: s.digitType,
+          numberCount: s.currentNumberCount,
+        }
+      }
       return {
         ...s,
+        consecutiveCorrect: 0,
+        streakCorrectMs: [],
         questionInRound: 1,
         correctInRound: 0,
         question: nextQuestion,
@@ -363,6 +445,22 @@ export function useGameState() {
         screen: 'question',
       }
     })
+    if (pendingAttempt) {
+      const a: {
+        rec: UserRecord
+        digitType: DigitType
+        numberCount: number
+      } = pendingAttempt
+      void recordCellAttemptStart(a.rec, a.digitType, a.numberCount).then(
+        (updated) => {
+          setState((cur) =>
+            cur.userRecord?.userKey === updated.userKey
+              ? { ...cur, userRecord: updated }
+              : cur,
+          )
+        },
+      )
+    }
   }, [])
 
   const enterGetBetterMode = useCallback(() => {
@@ -390,6 +488,7 @@ export function useGameState() {
       digitType: null,
       currentNumberCount: GAME_CONFIG.startNumberCount,
       consecutiveCorrect: 0,
+      streakCorrectMs: [],
       questionInRound: 0,
       correctInRound: 0,
       question: null,
