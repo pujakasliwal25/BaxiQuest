@@ -2,6 +2,7 @@ import { GAME_CONFIG } from '../config/gameConfig'
 
 interface RoundSummaryProps {
   correct: number
+  attempted: number
   currentNumberCount: number
   consecutiveCorrect: number
   leveledUpThisRound: boolean
@@ -13,6 +14,7 @@ interface RoundSummaryProps {
 
 export function RoundSummary({
   correct,
+  attempted,
   currentNumberCount,
   consecutiveCorrect,
   leveledUpThisRound,
@@ -22,6 +24,10 @@ export function RoundSummary({
   onGetBetter,
 }: RoundSummaryProps) {
   const hasWrongs = wrongCount > 0
+  // Mid-round level-up ends the round early — show the actual attempted
+  // count rather than the full 10-question denominator.
+  const endedEarly = attempted < GAME_CONFIG.questionsPerRound
+  const denominator = endedEarly ? attempted : GAME_CONFIG.questionsPerRound
 
   // Continue label changes based on whether the child leveled up. Either way
   // the action (playAgain) starts a fresh round at the current number count.
@@ -36,9 +42,12 @@ export function RoundSummary({
           Round Complete!
         </div>
         <div className="text-5xl font-black tabular-nums mb-1">
-          {correct}<span className="text-text-muted text-3xl"> / {GAME_CONFIG.questionsPerRound}</span>
+          {correct}
+          <span className="text-text-muted text-3xl"> / {denominator}</span>
         </div>
-        <div className="text-text-muted mb-6">correct</div>
+        <div className="text-text-muted mb-6">
+          {endedEarly ? 'correct (round ended on level-up)' : 'correct'}
+        </div>
 
         {leveledUpThisRound ? (
           <div className="rounded-card bg-level-green/20 border border-level-green/40 p-4 mb-3">

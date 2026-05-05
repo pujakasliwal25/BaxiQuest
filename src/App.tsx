@@ -59,6 +59,7 @@ export default function App() {
       {state.screen === 'round-summary' && (
         <RoundSummary
           correct={state.correctInRound}
+          attempted={state.questionInRound}
           currentNumberCount={state.currentNumberCount}
           consecutiveCorrect={state.consecutiveCorrect}
           leveledUpThisRound={state.leveledUpThisRound}

@@ -205,21 +205,15 @@ export function useGameState() {
       const justLeveledUp = s.feedback?.leveledUp === true
       const finishedRound = s.questionInRound >= GAME_CONFIG.questionsPerRound
 
-      if (finishedRound) {
+      // Level-up ends the current round immediately, no matter where we are
+      // in it. The wrongs we collected belong to the OLD level — round-summary
+      // offers Get Better Mode for them, then "Next level" starts a fresh
+      // round at the new number count.
+      if (justLeveledUp || finishedRound) {
         return {
           ...s,
           feedback: null,
           screen: 'round-summary',
-        }
-      }
-
-      if (justLeveledUp) {
-        const example = generateQuestion(s.digitType, s.currentNumberCount)
-        return {
-          ...s,
-          feedback: null,
-          pendingLevelExample: example,
-          screen: 'level-info',
         }
       }
 
@@ -283,19 +277,13 @@ export function useGameState() {
   }, [])
 
   const exitGetBetterMode = useCallback(() => {
+    // After review, return to round-summary so the child can pick "Next level"
+    // or "Change Digit Level". Preserves wrongs so they can revisit if they
+    // want; round-summary buttons (playAgain / startNextLevel / changeDigit)
+    // do the appropriate cleanup when the child commits to a next step.
     setState((s) => ({
       ...s,
-      digitType: null,
-      currentNumberCount: GAME_CONFIG.startNumberCount,
-      consecutiveCorrect: 0,
-      questionInRound: 0,
-      correctInRound: 0,
-      question: null,
-      feedback: null,
-      pendingLevelExample: null,
-      wrongAttemptsThisRound: [],
-      leveledUpThisRound: false,
-      screen: 'mode-select',
+      screen: s.digitType ? 'round-summary' : 'mode-select',
     }))
   }, [])
 
