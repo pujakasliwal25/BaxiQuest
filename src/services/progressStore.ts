@@ -163,6 +163,22 @@ function loadFromLocalStorage(userKey: string): UserRecord | null {
   }
 }
 
+function loadAllFromLocalStorage(): UserRecord[] {
+  try {
+    const out: UserRecord[] = []
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const key = window.localStorage.key(i)
+      if (!key || !key.startsWith(LS_PREFIX)) continue
+      const userKey = key.slice(LS_PREFIX.length)
+      const rec = loadFromLocalStorage(userKey)
+      if (rec) out.push(rec)
+    }
+    return out
+  } catch {
+    return []
+  }
+}
+
 function saveToLocalStorage(rec: UserRecord) {
   try {
     window.localStorage.setItem(LS_PREFIX + rec.userKey, JSON.stringify(rec))
@@ -267,14 +283,17 @@ export async function loadKnownCurriculumLevel(
   return null
 }
 
-// Admin: fetch every user record from Firestore. Returns an empty list if
-// Firestore isn't configured.
+// Admin: fetch every user record we know about. Tries Firestore first and
+// falls back to (or merges with) localStorage so admins testing locally
+// without Firebase configured still see at least the records on this
+// device. When both sources have a user, Firestore wins.
 export async function loadAllUsers(): Promise<UserRecord[]> {
+  const local = loadAllFromLocalStorage()
   const db = getDb()
-  if (!db) return []
+  if (!db) return local
   try {
     const snap = await getDocs(collection(db, 'users'))
-    const out: UserRecord[] = []
+    const remote: UserRecord[] = []
     snap.forEach((d) => {
       const data = d.data() as
         | (Partial<UserRecord> & {
@@ -283,7 +302,7 @@ export async function loadAllUsers(): Promise<UserRecord[]> {
           })
         | undefined
       if (!data) return
-      out.push({
+      remote.push({
         userKey: d.id,
         name: data.name ?? '',
         classCode: data.classCode ?? '',
@@ -294,10 +313,13 @@ export async function loadAllUsers(): Promise<UserRecord[]> {
         cellStats: normalizeCellStats(data.cellStats),
       })
     })
-    return out
+    const map = new Map<string, UserRecord>()
+    for (const r of local) map.set(r.userKey, r)
+    for (const r of remote) map.set(r.userKey, r)
+    return Array.from(map.values())
   } catch (err) {
     console.warn('[progressStore] admin load all failed:', err)
-    return []
+    return local
   }
 }
 

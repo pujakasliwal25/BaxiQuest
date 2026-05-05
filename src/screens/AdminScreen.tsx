@@ -192,8 +192,15 @@ export function AdminScreen({ onLogout }: AdminScreenProps) {
           </div>
         )}
         {users != null && filtered.length === 0 && (
-          <div className="text-text-muted text-sm text-center py-12">
-            No students match these filters.
+          <div className="text-text-muted text-sm text-center py-12 px-4">
+            {users.length === 0 ? (
+              <>
+                No student records found yet. Once a student logs in and
+                plays a round, their data will show up here.
+              </>
+            ) : (
+              <>No students match these filters.</>
+            )}
           </div>
         )}
         {filtered.length > 0 && (
