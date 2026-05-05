@@ -315,17 +315,17 @@ function CellDetailModal({
           <p className="text-text-muted text-sm mb-4">No attempts yet.</p>
         )}
 
-        {stat?.cleared ? (
+        {(stat?.attempts ?? 0) > 0 ? (
           <button
             onClick={onRedo}
             className="w-full min-h-touch bg-magic-gold text-bg-navy font-bold text-base rounded-btn px-4 py-3 active:scale-[0.99] transition-transform"
           >
-            Redo to improve avg
+            {stat?.cleared ? 'Redo to improve avg' : 'Play this level again'}
           </button>
         ) : (
           <p className="text-text-muted text-xs text-center">
-            Clear this level once and you'll be able to redo it from here to
-            chase a faster avg.
+            You haven't reached this level yet — work your way up from your
+            current level to unlock it.
           </p>
         )}
       </div>

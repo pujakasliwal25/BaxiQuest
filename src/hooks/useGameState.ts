@@ -526,29 +526,37 @@ export function useGameState() {
     setState((s) => ({ ...s, screen: 'mode-select' }))
   }, [])
 
-  // Replays a previously-cleared cell so the child can improve their avg
-  // time. inRedo flips on so submitAnswer suppresses the level-up branch —
-  // the child's overall progress (UserRecord.progress[digitType]) is left
-  // untouched. The cell's stats (avg, top-10, attempts) still update.
+  // Replays a cell from the scorecard. Two flavors based on the cell's
+  // cleared state:
+  //   • Cleared → inRedo=true. Auto-leveling is suppressed so the child's
+  //     progress isn't bumped by getting 3-in-a-row at a level they already
+  //     passed. Stats (avg, top-10, attempts) still update.
+  //   • Not yet cleared (their current frontier) → inRedo=false. Normal
+  //     play; getting 3-in-a-row clears it and advances them.
   const redoLevel = useCallback(
     (digitType: DigitType, numberCount: number) => {
-      setState((s) => ({
-        ...s,
-        digitType,
-        currentNumberCount: numberCount,
-        consecutiveCorrect: 0,
-        streakCorrectMs: [],
-        questionInRound: 0,
-        correctInRound: 0,
-        question: null,
-        feedback: null,
-        levelExtraTimeSeconds: 0,
-        levelNoTimer: false,
-        wrongAttemptsThisRound: [],
-        leveledUpThisRound: false,
-        inRedo: true,
-        screen: 'level-start',
-      }))
+      setState((s) => {
+        const wasCleared =
+          s.userRecord?.cellStats[cellKey(digitType, numberCount)]?.cleared ??
+          false
+        return {
+          ...s,
+          digitType,
+          currentNumberCount: numberCount,
+          consecutiveCorrect: 0,
+          streakCorrectMs: [],
+          questionInRound: 0,
+          correctInRound: 0,
+          question: null,
+          feedback: null,
+          levelExtraTimeSeconds: 0,
+          levelNoTimer: false,
+          wrongAttemptsThisRound: [],
+          leveledUpThisRound: false,
+          inRedo: wasCleared,
+          screen: 'level-start',
+        }
+      })
     },
     [],
   )
