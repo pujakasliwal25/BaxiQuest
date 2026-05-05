@@ -19,17 +19,16 @@ export function cellKey(digitType: DigitType, numberCount: number): string {
   return `${digitType}:${numberCount}`
 }
 
-const RECENT_ATTEMPT_LIMIT = 10
-const TOP_FASTEST_LIMIT = 10
+const ATTEMPT_HISTORY_LIMIT = 25
 
-export interface AttemptRecord {
+export interface QuestionOutcome {
   ms: number
   correct: boolean
 }
 
-export interface FastestRecord {
-  ms: number
-  at: number
+export interface AttemptDetail {
+  startedAt: number
+  questions: QuestionOutcome[]
 }
 
 // Per-cell stat shape. A "cell" is one (digitType, numberCount) coordinate
@@ -50,12 +49,12 @@ export interface CellStat {
   // Count of rounds attempted at this cell (each round-start increments).
   attempts: number
   lastAttemptAt: number | null
-  // Sliding window of the most recent attempts at this cell. Used to
-  // compute "avg of correct in last 10" for cells the child hasn't yet
-  // cleared.
-  recentAttempts: AttemptRecord[]
-  // Top 10 fastest individual correct answers, sorted ascending. Bounded.
-  topTenFastestMs: FastestRecord[]
+  // Per-attempt detail with question-by-question outcomes, capped at the
+  // most recent N rounds. Drives the scorecard detail view (with restarted
+  // numbering and a highlighted best-3 run). Older attempts roll off; the
+  // headline bestThreeInARowAvgMs still reflects the lifetime best even if
+  // its source run is no longer in history.
+  attemptHistory: AttemptDetail[]
 }
 
 export type CellStats = Record<string, CellStat>
@@ -69,8 +68,7 @@ export function emptyCellStat(): CellStat {
     wrongCount: 0,
     attempts: 0,
     lastAttemptAt: null,
-    recentAttempts: [],
-    topTenFastestMs: [],
+    attemptHistory: [],
   }
 }
 
@@ -93,12 +91,34 @@ export function buildUserKey(classCode: string, name: string): string {
   return `${code}_${n}`
 }
 
+function normalizeAttemptDetail(raw: unknown): AttemptDetail | null {
+  if (!raw || typeof raw !== 'object') return null
+  const v = raw as Partial<AttemptDetail>
+  if (typeof v.startedAt !== 'number') return null
+  if (!Array.isArray(v.questions)) return null
+  const questions: QuestionOutcome[] = []
+  for (const q of v.questions) {
+    if (!q || typeof q !== 'object') continue
+    const qq = q as Partial<QuestionOutcome>
+    if (typeof qq.ms !== 'number') continue
+    questions.push({ ms: qq.ms, correct: Boolean(qq.correct) })
+  }
+  return { startedAt: v.startedAt, questions }
+}
+
 function normalizeCellStats(raw: unknown): CellStats {
   if (!raw || typeof raw !== 'object') return {}
   const out: CellStats = {}
   for (const [key, val] of Object.entries(raw as Record<string, unknown>)) {
     if (!val || typeof val !== 'object') continue
     const v = val as Partial<CellStat>
+    const history: AttemptDetail[] = []
+    if (Array.isArray(v.attemptHistory)) {
+      for (const a of v.attemptHistory) {
+        const norm = normalizeAttemptDetail(a)
+        if (norm) history.push(norm)
+      }
+    }
     out[key] = {
       cleared: Boolean(v.cleared),
       bestThreeInARowAvgMs:
@@ -112,12 +132,7 @@ function normalizeCellStats(raw: unknown): CellStats {
       attempts: typeof v.attempts === 'number' ? v.attempts : 0,
       lastAttemptAt:
         typeof v.lastAttemptAt === 'number' ? v.lastAttemptAt : null,
-      recentAttempts: Array.isArray(v.recentAttempts)
-        ? v.recentAttempts.slice(-RECENT_ATTEMPT_LIMIT)
-        : [],
-      topTenFastestMs: Array.isArray(v.topTenFastestMs)
-        ? v.topTenFastestMs.slice(0, TOP_FASTEST_LIMIT)
-        : [],
+      attemptHistory: history.slice(-ATTEMPT_HISTORY_LIMIT),
     }
   }
   return out
@@ -269,7 +284,9 @@ export async function saveProgress(
   return updated
 }
 
-// Bumps the attempt counter for a cell (each round-start = one attempt).
+// Bumps the attempt counter for a cell and starts a fresh AttemptDetail
+// entry that subsequent recordCellAnswer calls will append to. Capped at
+// the most recent ATTEMPT_HISTORY_LIMIT rounds.
 export async function recordCellAttemptStart(
   rec: UserRecord,
   digitType: DigitType,
@@ -277,10 +294,16 @@ export async function recordCellAttemptStart(
 ): Promise<UserRecord> {
   const key = cellKey(digitType, numberCount)
   const prev = rec.cellStats[key] ?? emptyCellStat()
+  const now = Date.now()
+  const attemptHistory = [
+    ...prev.attemptHistory,
+    { startedAt: now, questions: [] },
+  ].slice(-ATTEMPT_HISTORY_LIMIT)
   const next: CellStat = {
     ...prev,
     attempts: prev.attempts + 1,
-    lastAttemptAt: Date.now(),
+    lastAttemptAt: now,
+    attemptHistory,
   }
   const updated: UserRecord = {
     ...rec,
@@ -312,20 +335,25 @@ export async function recordCellAnswer(
   const key = cellKey(digitType, numberCount)
   const prev = rec.cellStats[key] ?? emptyCellStat()
   const now = Date.now()
-  const recentAttempts = [
-    ...prev.recentAttempts,
-    { ms: input.elapsedMs, correct: input.correct },
-  ].slice(-RECENT_ATTEMPT_LIMIT)
 
-  let topTenFastestMs = prev.topTenFastestMs
-  if (input.correct) {
-    topTenFastestMs = [
-      ...prev.topTenFastestMs,
-      { ms: input.elapsedMs, at: now },
-    ]
-      .sort((a, b) => a.ms - b.ms)
-      .slice(0, TOP_FASTEST_LIMIT)
+  // Append the question outcome to the most recent attempt. If for some
+  // reason there's no in-progress attempt (defensive — should always be
+  // set by recordCellAttemptStart), start one implicitly.
+  let attemptHistory = prev.attemptHistory
+  if (attemptHistory.length === 0) {
+    attemptHistory = [{ startedAt: now, questions: [] }]
   }
+  const lastIdx = attemptHistory.length - 1
+  attemptHistory = [
+    ...attemptHistory.slice(0, lastIdx),
+    {
+      ...attemptHistory[lastIdx],
+      questions: [
+        ...attemptHistory[lastIdx].questions,
+        { ms: input.elapsedMs, correct: input.correct },
+      ],
+    },
+  ]
 
   let bestThreeInARowAvgMs = prev.bestThreeInARowAvgMs
   let bestThreeInARowAt = prev.bestThreeInARowAt
@@ -350,8 +378,7 @@ export async function recordCellAnswer(
     wrongCount: prev.wrongCount + (input.correct ? 0 : 1),
     attempts: prev.attempts,
     lastAttemptAt: now,
-    recentAttempts,
-    topTenFastestMs,
+    attemptHistory,
   }
   const updated: UserRecord = {
     ...rec,
@@ -364,17 +391,50 @@ export async function recordCellAnswer(
 
 // Headline avg-time metric for a cell:
 //   • Cleared cells: best 3-in-a-row avg.
-//   • Not-yet-cleared cells: avg of correct ms in the most recent 10
-//     attempts; null if none of the recent attempts were correct.
+//   • Not-yet-cleared cells: avg of correct ms in the most recent attempt
+//     (the latest round of up to 10 questions). Null if none correct.
 export function headlineAvgMs(stat: CellStat | undefined): number | null {
   if (!stat) return null
   if (stat.cleared && stat.bestThreeInARowAvgMs != null) {
     return stat.bestThreeInARowAvgMs
   }
-  const corrects = stat.recentAttempts.filter((a) => a.correct)
+  const last = stat.attemptHistory[stat.attemptHistory.length - 1]
+  if (!last) return null
+  const corrects = last.questions.filter((q) => q.correct)
   if (corrects.length === 0) return null
-  const sum = corrects.reduce((s, a) => s + a.ms, 0)
+  const sum = corrects.reduce((s, q) => s + q.ms, 0)
   return sum / corrects.length
+}
+
+// Within an attempt history, find the lowest-avg 3-consecutive-correct
+// window across all attempts. Returns null if no 3-in-a-row exists in the
+// visible history (e.g., no attempt ever produced one, or the run rolled
+// off when older attempts were trimmed).
+export interface BestThreeLocation {
+  attemptIndex: number
+  startQuestionIndex: number
+  avgMs: number
+}
+
+export function findBestThreeInARow(
+  history: AttemptDetail[],
+): BestThreeLocation | null {
+  let best: BestThreeLocation | null = null
+  history.forEach((attempt, attemptIndex) => {
+    const qs = attempt.questions
+    for (let i = 0; i + 2 < qs.length; i++) {
+      const a = qs[i]
+      const b = qs[i + 1]
+      const c = qs[i + 2]
+      if (a.correct && b.correct && c.correct) {
+        const avg = (a.ms + b.ms + c.ms) / 3
+        if (best == null || avg < best.avgMs) {
+          best = { attemptIndex, startQuestionIndex: i, avgMs: avg }
+        }
+      }
+    }
+  })
+  return best
 }
 
 export function getCellStat(

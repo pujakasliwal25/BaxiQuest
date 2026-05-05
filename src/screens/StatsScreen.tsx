@@ -7,8 +7,10 @@ import {
   pickBestForCell,
 } from '../services/leaderboardStore'
 import {
+  type AttemptDetail,
   cellKey,
   type CellStat,
+  findBestThreeInARow,
   getCellStat,
   headlineAvgMs,
   type UserRecord,
@@ -279,36 +281,16 @@ function CellDetailModal({
               <Stat label="✓ Correct" value={String(stat.correctCount)} />
               <Stat label="✗ Wrong" value={String(stat.wrongCount)} />
               <Stat
-                label={stat.cleared ? 'Best 3-in-row avg' : 'Avg of last 10 ✓'}
+                label={
+                  stat.cleared ? 'Best 3-in-row avg' : 'Avg of latest round ✓'
+                }
                 value={fmtMs(headlineAvgMs(stat))}
                 wide
               />
             </div>
 
-            {stat.topTenFastestMs.length > 0 && (
-              <div className="mb-4">
-                <div className="text-xs text-text-muted uppercase tracking-wider font-semibold mb-2">
-                  Top 10 fastest correct
-                </div>
-                <ol className="text-sm space-y-1">
-                  {stat.topTenFastestMs.map((f, i) => (
-                    <li
-                      key={i}
-                      className="flex justify-between items-center bg-bg-navy rounded px-2 py-1"
-                    >
-                      <span className="text-text-muted text-xs w-6">
-                        #{i + 1}
-                      </span>
-                      <span className="font-bold tabular-nums">
-                        {fmtMs(f.ms)}
-                      </span>
-                      <span className="text-text-muted text-xs">
-                        {fmtDate(f.at)}
-                      </span>
-                    </li>
-                  ))}
-                </ol>
-              </div>
+            {stat.attemptHistory.length > 0 && (
+              <AttemptHistory history={stat.attemptHistory} />
             )}
           </>
         ) : (
@@ -514,6 +496,84 @@ function Stat({
         {label}
       </div>
       <div className="text-sm font-bold tabular-nums">{value}</div>
+    </div>
+  )
+}
+
+function AttemptHistory({ history }: { history: AttemptDetail[] }) {
+  // Newest first so the most recent attempt is at the top, matching the way
+  // a child would naturally scan their history.
+  const reversed = history.slice().reverse()
+  const best = findBestThreeInARow(history)
+  return (
+    <div className="mb-4">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-xs text-text-muted uppercase tracking-wider font-semibold">
+          Attempts ({history.length})
+        </div>
+        {best && (
+          <div className="text-[10px] text-magic-gold font-semibold">
+            Best 3-in-a-row · avg {fmtMs(best.avgMs)}
+          </div>
+        )}
+      </div>
+      <div className="space-y-2">
+        {reversed.map((attempt, revIdx) => {
+          // Map back to the index in the original (chronological) array so
+          // we can match `findBestThreeInARow`'s coordinates.
+          const originalIdx = history.length - 1 - revIdx
+          const correct = attempt.questions.filter((q) => q.correct).length
+          const total = attempt.questions.length
+          const isBestAttempt = best?.attemptIndex === originalIdx
+          return (
+            <div
+              key={attempt.startedAt}
+              className="rounded-card bg-bg-navy border border-card-border p-2"
+            >
+              <div className="flex items-center justify-between mb-1.5 text-[11px]">
+                <span className="font-semibold">
+                  Attempt #{originalIdx + 1}
+                </span>
+                <span className="text-text-muted">
+                  {fmtDate(attempt.startedAt)} · {correct}/{total}
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {attempt.questions.map((q, qIdx) => {
+                  const inBest =
+                    isBestAttempt &&
+                    best != null &&
+                    qIdx >= best.startQuestionIndex &&
+                    qIdx <= best.startQuestionIndex + 2
+                  return (
+                    <div
+                      key={qIdx}
+                      className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] tabular-nums border ${
+                        inBest
+                          ? 'bg-magic-gold/30 border-magic-gold text-white font-bold'
+                          : q.correct
+                            ? 'bg-level-green/20 border-level-green/40 text-white'
+                            : 'bg-quest-red/15 border-quest-red/40 text-white/70'
+                      }`}
+                      title={
+                        inBest
+                          ? 'Part of your best 3-in-a-row'
+                          : q.correct
+                            ? 'Correct'
+                            : 'Wrong'
+                      }
+                    >
+                      <span className="text-text-muted">{qIdx + 1}.</span>
+                      <span>{q.correct ? '✓' : '✗'}</span>
+                      <span>{fmtMs(q.ms)}</span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )
+        })}
+      </div>
     </div>
   )
 }
