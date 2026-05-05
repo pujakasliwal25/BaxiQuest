@@ -306,12 +306,19 @@ function CellDetailModal({
           <p className="text-text-muted text-sm mb-4">No attempts yet.</p>
         )}
 
-        <button
-          onClick={onRedo}
-          className="w-full min-h-touch bg-magic-gold text-bg-navy font-bold text-base rounded-btn px-4 py-3 active:scale-[0.99] transition-transform"
-        >
-          Redo this level
-        </button>
+        {stat?.cleared ? (
+          <button
+            onClick={onRedo}
+            className="w-full min-h-touch bg-magic-gold text-bg-navy font-bold text-base rounded-btn px-4 py-3 active:scale-[0.99] transition-transform"
+          >
+            Redo to improve avg
+          </button>
+        ) : (
+          <p className="text-text-muted text-xs text-center">
+            Clear this level once and you'll be able to redo it from here to
+            chase a faster avg.
+          </p>
+        )}
       </div>
     </div>
   )

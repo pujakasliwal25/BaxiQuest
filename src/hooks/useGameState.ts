@@ -61,6 +61,11 @@ export interface GameState {
   wrongAttemptsThisRound: WrongAttempt[]
   // Whether the child reached a new level during the current round.
   leveledUpThisRound: boolean
+  // True while the child is replaying a previously-cleared cell from the
+  // scorecard. Auto-leveling is suppressed in this mode so progress is
+  // preserved (they can't accidentally bump their currentNumberCount up
+  // by getting 3-in-a-row at a level they already cleared).
+  inRedo: boolean
 }
 
 const INITIAL_STATE: GameState = {
@@ -79,6 +84,7 @@ const INITIAL_STATE: GameState = {
   levelNoTimer: false,
   wrongAttemptsThisRound: [],
   leveledUpThisRound: false,
+  inRedo: false,
 }
 
 function startCountFor(rec: UserRecord | null, dt: DigitType): number {
@@ -164,6 +170,7 @@ export function useGameState() {
         levelNoTimer: false,
         wrongAttemptsThisRound: [],
         leveledUpThisRound: false,
+        inRedo: false,
         screen: 'level-start',
       }
     })
@@ -239,6 +246,7 @@ export function useGameState() {
         levelNoTimer: false,
         wrongAttemptsThisRound: [],
         leveledUpThisRound: false,
+        inRedo: false,
         screen: 'level-start',
       }
     })
@@ -294,6 +302,7 @@ export function useGameState() {
       }
       if (
         hitThreeInARow &&
+        !s.inRedo &&
         currentNumberCount < GAME_CONFIG.maxNumberCount
       ) {
         consecutiveCorrect = 0
@@ -302,8 +311,9 @@ export function useGameState() {
         newNumberCount = currentNumberCount
         nextStreakMs = []
       } else if (hitThreeInARow) {
-        // Cap reached: still reset the streak so subsequent 3-in-a-rows count
-        // as separate samples.
+        // Either we're at the digit cap, or we're in redo mode at a cell the
+        // child already cleared. Either way: reset the streak so subsequent
+        // 3-in-a-rows count as separate samples, but don't advance.
         consecutiveCorrect = 0
         nextStreakMs = []
       }
@@ -491,9 +501,10 @@ export function useGameState() {
     setState((s) => ({ ...s, screen: 'mode-select' }))
   }, [])
 
-  // Replaced with the real redo behavior in Phase E. For now, just sends the
-  // child to a fresh level-start at the chosen cell. Auto-leveling suppression
-  // and progress preservation are layered on next.
+  // Replays a previously-cleared cell so the child can improve their avg
+  // time. inRedo flips on so submitAnswer suppresses the level-up branch —
+  // the child's overall progress (UserRecord.progress[digitType]) is left
+  // untouched. The cell's stats (avg, top-10, attempts) still update.
   const redoLevel = useCallback(
     (digitType: DigitType, numberCount: number) => {
       setState((s) => ({
@@ -510,6 +521,7 @@ export function useGameState() {
         levelNoTimer: false,
         wrongAttemptsThisRound: [],
         leveledUpThisRound: false,
+        inRedo: true,
         screen: 'level-start',
       }))
     },
@@ -531,6 +543,7 @@ export function useGameState() {
       levelNoTimer: false,
       wrongAttemptsThisRound: [],
       leveledUpThisRound: false,
+      inRedo: false,
       screen: 'mode-select',
     }))
   }, [])
