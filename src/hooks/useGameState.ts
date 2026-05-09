@@ -8,10 +8,14 @@ import {
   addCoins,
   buildUserKey,
   cellKey,
+  clearLastUser,
+  getLastUser,
+  loadUserRecord,
   recordCellAnswer,
   recordCellAttemptStart,
   recordUser,
   saveProgress,
+  setLastUser,
   type UserRecord,
 } from '../services/progressStore'
 import { type CoinPayout, computeCoinPayout } from '../utils/coins'
@@ -140,7 +144,7 @@ export function useGameState() {
       classCode: string,
       name: string,
       curriculumLevel: CurriculumLevel,
-    ): Promise<boolean> => {
+    ): Promise<'admin' | 'student' | null> => {
       const normalized = classCode.trim().toUpperCase()
       const isAdminCode = GAME_CONFIG.adminClassCodes
         .map((c) => c.toUpperCase())
@@ -148,17 +152,24 @@ export function useGameState() {
       if (isAdminCode) {
         // Admin sign-in skips the user-record flow — admins don't have
         // their own stats or progress. We just route to the admin screen.
+        const adminName = name.trim() || 'Admin'
+        setLastUser({
+          userKey: `admin:${normalized}`,
+          role: 'admin',
+          name: adminName,
+          classCode: normalized,
+        })
         setState((s) => ({
           ...s,
-          name: name.trim() || 'Admin',
+          name: adminName,
           screen: 'admin',
         }))
-        return true
+        return 'admin'
       }
       const valid = GAME_CONFIG.validClassCodes
         .map((c) => c.toUpperCase())
         .includes(normalized)
-      if (!valid) return false
+      if (!valid) return null
 
       const trimmedName = name.trim()
       const userKey = buildUserKey(normalized, trimmedName)
@@ -184,16 +195,55 @@ export function useGameState() {
         }
       }
 
+      setLastUser({
+        userKey,
+        role: 'student',
+        name: trimmedName,
+        classCode: normalized,
+      })
       setState((s) => ({
         ...s,
         name: trimmedName,
         userRecord,
         screen: 'mode-select',
       }))
-      return true
+      return 'student'
     },
     [],
   )
+
+  // Tries to rehydrate a previous session from localStorage so the child
+  // (or admin) doesn't have to re-enter their class code on every reload.
+  // Returns the role that was restored, or null if there's nothing to
+  // restore. Idempotent — safe to call multiple times.
+  const restoreSession = useCallback(async (): Promise<
+    'student' | 'admin' | null
+  > => {
+    const last = getLastUser()
+    if (!last) return null
+    if (last.role === 'admin') {
+      setState((s) => ({
+        ...s,
+        name: last.name || 'Admin',
+        screen: 'admin',
+      }))
+      return 'admin'
+    }
+    const rec = await loadUserRecord(last.userKey)
+    if (!rec) {
+      // Stored pointer references a record we can't find anywhere — clear
+      // it so we don't loop on every load.
+      clearLastUser()
+      return null
+    }
+    setState((s) => ({
+      ...s,
+      name: rec.name,
+      userRecord: rec,
+      screen: 'mode-select',
+    }))
+    return 'student'
+  }, [])
 
   // Picking a digit type lands on the level-start screen so the child can
   // choose timer options before the first question. The level state (number
@@ -704,6 +754,7 @@ export function useGameState() {
 
   const logout = useCallback(() => {
     clearFeedbackTimer()
+    clearLastUser()
     setState(INITIAL_STATE)
   }, [])
 
@@ -728,6 +779,7 @@ export function useGameState() {
   const actions = useMemo(
     () => ({
       login,
+      restoreSession,
       startGame,
       confirmLevelStart,
       startNextLevel,
@@ -745,6 +797,7 @@ export function useGameState() {
     }),
     [
       login,
+      restoreSession,
       startGame,
       confirmLevelStart,
       startNextLevel,

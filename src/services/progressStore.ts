@@ -90,6 +90,55 @@ export interface UserRecord {
 }
 
 const LS_PREFIX = 'baxiquest:user:'
+// Single-slot pointer to the most recently logged-in identity, so the app
+// can auto-resume on reload instead of re-asking for class code + name.
+// Cleared on explicit logout.
+const LS_LAST_USER_KEY = 'baxiquest:lastUser'
+
+export type LastUserRole = 'student' | 'admin'
+
+export interface LastUser {
+  userKey: string
+  role: LastUserRole
+  // Display name carried over for admin restore (admins don't have a
+  // UserRecord — name is the only field worth preserving).
+  name: string
+  classCode: string
+}
+
+export function getLastUser(): LastUser | null {
+  try {
+    const raw = window.localStorage.getItem(LS_LAST_USER_KEY)
+    if (!raw) return null
+    const parsed = JSON.parse(raw) as Partial<LastUser>
+    if (typeof parsed.userKey !== 'string' || !parsed.userKey) return null
+    const role: LastUserRole = parsed.role === 'admin' ? 'admin' : 'student'
+    return {
+      userKey: parsed.userKey,
+      role,
+      name: typeof parsed.name === 'string' ? parsed.name : '',
+      classCode: typeof parsed.classCode === 'string' ? parsed.classCode : '',
+    }
+  } catch {
+    return null
+  }
+}
+
+export function setLastUser(v: LastUser): void {
+  try {
+    window.localStorage.setItem(LS_LAST_USER_KEY, JSON.stringify(v))
+  } catch {
+    // ignore
+  }
+}
+
+export function clearLastUser(): void {
+  try {
+    window.localStorage.removeItem(LS_LAST_USER_KEY)
+  } catch {
+    // ignore
+  }
+}
 
 export function buildUserKey(classCode: string, name: string): string {
   const code = classCode.trim().toUpperCase()
@@ -220,6 +269,17 @@ async function loadFromFirestore(userKey: string): Promise<UserRecord | null> {
     console.warn('[progressStore] firestore load failed:', err)
     return null
   }
+}
+
+// Public read used for session restore: prefers Firestore so a child who
+// signed in on another device still picks up their progress on first
+// visit; falls back to whatever's on this device.
+export async function loadUserRecord(
+  userKey: string,
+): Promise<UserRecord | null> {
+  const remote = await loadFromFirestore(userKey)
+  if (remote) return remote
+  return loadFromLocalStorage(userKey)
 }
 
 async function saveToFirestore(

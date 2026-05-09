@@ -7,11 +7,12 @@ import {
 } from '../utils/curriculumLevel'
 
 interface LoginScreenProps {
+  // Returns the role the user logged in as, or null on bad code.
   onSubmit: (
     classCode: string,
     name: string,
     curriculumLevel: CurriculumLevel,
-  ) => Promise<boolean> | boolean
+  ) => Promise<'admin' | 'student' | null>
 }
 
 export function LoginScreen({ onSubmit }: LoginScreenProps) {
@@ -49,8 +50,8 @@ export function LoginScreen({ onSubmit }: LoginScreenProps) {
     }
     setLoading(true)
     try {
-      const ok = await onSubmit(classCode, name, curriculumLevel)
-      if (!ok) {
+      const role = await onSubmit(classCode, name, curriculumLevel)
+      if (!role) {
         setError('Oops! Check your class code')
       }
     } catch (err) {
