@@ -2,51 +2,66 @@ rules_version = '2';
 
 // Firestore security rules for BAXI Quest.
 //
-// IMPORTANT: This app has no real authentication yet — the "login" is just
-// a typed class code. That means we can't tie reads/writes to a Firebase
-// Auth uid. The best we can do at this layer is:
-//
-//  1. Allow access only to the two collections the app actually uses.
-//  2. Constrain the shape of writes so a malicious client can't dump
-//     arbitrary documents into the project.
-//  3. Cap field counts and string lengths so a vandal can't burn quota.
-//
-// When real auth lands, tighten these rules to require
-// `request.auth != null` and `request.auth.uid == userKey` (or similar).
-// Until then, treat the database as semi-public — only data the app
-// already exposes in the UI.
+// Now that real auth is in place (Firebase Auth, email/password under the
+// hood with username → synthetic email mapping), reads/writes are gated
+// on `request.auth != null`. Admin-only operations check the synthetic
+// email against an allowlist that mirrors the ADMIN_USERNAMES constant
+// in src/services/authStore.ts. To grant admin to additional usernames,
+// update both this file AND that constant, then redeploy + republish
+// rules.
 
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // ── Helpers ────────────────────────────────────────────────────────
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    function isAdmin() {
+      // Synthetic emails look like `<username>@baxiquest.app`. Compare on
+      // the email so we don't have to maintain a uid allowlist (uids are
+      // assigned at signup and not knowable in advance).
+      return isSignedIn()
+        && request.auth.token.email == 'baxiadmin@baxiquest.app';
+    }
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
     // ── Users collection ───────────────────────────────────────────────
-    // Each doc id is `<CLASSCODE>_<lowercased_name>` (see buildUserKey).
-    // The admin view reads the whole collection; an individual student
-    // reads + writes only their own doc.
-    match /users/{userKey} {
-      allow read: if true;
+    // Doc id = Firebase uid. A student reads/writes only their own doc.
+    // Admins can read every user (for the admin dashboard) but writes are
+    // self-only — we never want admins silently rewriting someone's
+    // progress.
+    match /users/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+      allow create, update: if isSelf(uid)
+                         && isValidUserDoc(request.resource.data);
+      allow delete: if isAdmin();
+    }
 
-      allow create, update: if isValidUserDoc(request.resource.data)
-                         && userKey.size() <= 120
-                         && userKey.size() > 0;
-
-      // No client-side delete — admin "Reset all" deletes through the same
-      // path as a write, but a vandal shouldn't be able to nuke arbitrary
-      // users. If you want admins to delete, build that path through a
-      // Cloud Function with auth.
-      allow delete: if false;
+    // ── Classes ────────────────────────────────────────────────────────
+    // Anyone signed in can list classes (used for class-code lookup
+    // during join). Only admins can create / modify / delete.
+    match /classes/{classId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if isAdmin()
+                                 && isValidClassDoc(request.resource.data);
     }
 
     // ── Leaderboard entries ────────────────────────────────────────────
-    // Doc id format: `<cellKey>__<userKey>` (deterministic so the same
-    // user/cell pair overwrites instead of appending).
+    // Doc id format: `<cellKey>__<userKey>`. Anyone signed in can read
+    // (for the leaderboard view). A student writes only their own entry —
+    // we use the userKey embedded in the id and document body.
     match /leaderboardEntries/{entryId} {
-      allow read: if true;
-      allow create, update: if isValidLeaderboardEntry(request.resource.data);
-      allow delete: if false;
+      allow read: if isSignedIn();
+      allow create, update: if isSignedIn()
+                         && isValidLeaderboardEntry(request.resource.data)
+                         && request.resource.data.userKey == request.auth.uid;
+      allow delete: if isAdmin();
     }
 
-    // Anything outside the two known collections is rejected.
+    // Anything outside the three known collections is rejected.
     match /{document=**} {
       allow read, write: if false;
     }
@@ -59,21 +74,23 @@ function isString(v, maxLen) {
   return v is string && v.size() <= maxLen;
 }
 
-function isOptionalNumber(v) {
-  return !('exists' in v) || v == null || v is number;
-}
-
 function isValidUserDoc(d) {
-  // Required surface: name, classCode, curriculumLevel.
-  // Everything else is structural — the app may be evolving the shape, so
-  // we keep this loose but capped.
-  return d.keys().size() <= 12
+  return d.keys().size() <= 14
       && (!('name' in d) || isString(d.name, 80))
-      && (!('classCode' in d) || isString(d.classCode, 32))
+      && (!('username' in d) || isString(d.username, 32))
+      && (!('classId' in d) || d.classId == null || isString(d.classId, 64))
       && (!('curriculumLevel' in d) || isString(d.curriculumLevel, 8))
       && (!('coins' in d) || (d.coins is number && d.coins <= 10000000))
       && (!('progress' in d) || d.progress is map)
       && (!('cellStats' in d) || d.cellStats is map);
+}
+
+function isValidClassDoc(d) {
+  return d.keys().size() <= 8
+      && (!('name' in d) || isString(d.name, 80))
+      && (!('code' in d) || isString(d.code, 16))
+      && (!('curriculumLevel' in d) || isString(d.curriculumLevel, 8))
+      && (!('createdByUid' in d) || isString(d.createdByUid, 64));
 }
 
 function isValidLeaderboardEntry(d) {

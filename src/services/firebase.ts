@@ -1,4 +1,5 @@
 import { getApps, initializeApp, type FirebaseApp } from 'firebase/app'
+import { type Auth, getAuth } from 'firebase/auth'
 import { getFirestore, type Firestore } from 'firebase/firestore'
 
 interface FirebaseEnv {
@@ -29,21 +30,45 @@ function readEnv(): FirebaseEnv | null {
 
 let cachedApp: FirebaseApp | null = null
 let cachedDb: Firestore | null = null
+let cachedAuth: Auth | null = null
 let initAttempted = false
 
-export function getDb(): Firestore | null {
-  if (initAttempted) return cachedDb
+function ensureApp(): FirebaseApp | null {
+  if (initAttempted) return cachedApp
   initAttempted = true
-
   const env = readEnv()
   if (!env) return null
-
   try {
     cachedApp = getApps()[0] ?? initializeApp(env)
-    cachedDb = getFirestore(cachedApp)
-    return cachedDb
+    return cachedApp
   } catch (err) {
     console.warn('[firebase] failed to initialize:', err)
+    return null
+  }
+}
+
+export function getDb(): Firestore | null {
+  if (cachedDb) return cachedDb
+  const app = ensureApp()
+  if (!app) return null
+  try {
+    cachedDb = getFirestore(app)
+    return cachedDb
+  } catch (err) {
+    console.warn('[firebase] failed to get firestore:', err)
+    return null
+  }
+}
+
+export function getAuthClient(): Auth | null {
+  if (cachedAuth) return cachedAuth
+  const app = ensureApp()
+  if (!app) return null
+  try {
+    cachedAuth = getAuth(app)
+    return cachedAuth
+  } catch (err) {
+    console.warn('[firebase] failed to get auth:', err)
     return null
   }
 }

@@ -6,36 +6,37 @@ import {
 } from '../services/leaderboardStore'
 import {
   addCoins,
-  buildUserKey,
   cellKey,
-  clearLastUser,
-  getLastUser,
-  loadUserRecord,
+  ensureUserRecord,
   recordCellAnswer,
   recordCellAttemptStart,
-  recordUser,
   saveProgress,
-  setLastUser,
+  setUserClass,
   type UserRecord,
 } from '../services/progressStore'
+import {
+  type AuthIdentity,
+  observeAuth,
+  signOut as authSignOut,
+} from '../services/authStore'
+import { findClassByCode } from '../services/classStore'
 import { type CoinPayout, computeCoinPayout } from '../utils/coins'
-import type { CurriculumLevel } from '../utils/curriculumLevel'
 import {
   type DigitType,
   type Question,
   generateQuestion,
 } from '../utils/questionGenerator'
 
+// Screens are now only the in-game state machine; auth/admin/stats are
+// route-driven, not state-driven.
 export type Screen =
-  | 'login'
+  | 'idle'
   | 'mode-select'
-  | 'stats'
   | 'level-start'
   | 'question'
   | 'round-summary'
   | 'redo-complete'
   | 'get-better'
-  | 'admin'
 
 export interface FeedbackState {
   kind: 'correct' | 'wrong'
@@ -56,9 +57,16 @@ export interface WrongAttempt {
   userAnswer: number | null
 }
 
+// Coarse-grained auth lifecycle for the route shell to react to. We start
+// in 'loading' until the first observeAuth callback fires, so the UI
+// doesn't flash login → home → wherever on reload.
+export type AuthStatus = 'loading' | 'signed-out' | 'signed-in'
+
 export interface GameState {
   screen: Screen
   name: string
+  authStatus: AuthStatus
+  authIdentity: AuthIdentity | null
   userRecord: UserRecord | null
   digitType: DigitType | null
   currentNumberCount: number
@@ -103,8 +111,10 @@ export interface GameState {
 }
 
 const INITIAL_STATE: GameState = {
-  screen: 'login',
+  screen: 'idle',
   name: '',
+  authStatus: 'loading',
+  authIdentity: null,
   userRecord: null,
   digitType: null,
   currentNumberCount: GAME_CONFIG.startNumberCount,
@@ -139,110 +149,89 @@ export function useGameState() {
     }
   }
 
-  const login = useCallback(
-    async (
-      classCode: string,
-      name: string,
-      curriculumLevel: CurriculumLevel,
-    ): Promise<'admin' | 'student' | null> => {
-      const normalized = classCode.trim().toUpperCase()
-      const isAdminCode = GAME_CONFIG.adminClassCodes
-        .map((c) => c.toUpperCase())
-        .includes(normalized)
-      if (isAdminCode) {
-        // Admin sign-in skips the user-record flow — admins don't have
-        // their own stats or progress. We just route to the admin screen.
-        const adminName = name.trim() || 'Admin'
-        setLastUser({
-          userKey: `admin:${normalized}`,
-          role: 'admin',
-          name: adminName,
-          classCode: normalized,
+  // Subscribe to Firebase Auth on mount. Whenever the auth identity
+  // changes (sign-in, sign-out, persisted reload), we hydrate or clear the
+  // game state in lockstep. ensureUserRecord is idempotent — first call
+  // creates a fresh record; later calls just refresh the username/name.
+  useEffect(() => {
+    const unsub = observeAuth(async (identity) => {
+      if (!identity) {
+        // Signed out — drop everything but keep authStatus accurate so the
+        // route shell knows we're done loading.
+        clearFeedbackTimer()
+        setState({ ...INITIAL_STATE, authStatus: 'signed-out' })
+        return
+      }
+      if (identity.role === 'admin') {
+        // Admins don't have a UserRecord (no progress, no class). Just
+        // capture the identity; routes will send them to /admin.
+        setState((s) => ({
+          ...s,
+          authStatus: 'signed-in',
+          authIdentity: identity,
+          name: identity.displayName,
+          userRecord: null,
+          screen: 'idle',
+        }))
+        return
+      }
+      try {
+        const rec = await ensureUserRecord({
+          uid: identity.uid,
+          username: identity.username,
+          name: identity.displayName,
         })
         setState((s) => ({
           ...s,
-          name: adminName,
-          screen: 'admin',
+          authStatus: 'signed-in',
+          authIdentity: identity,
+          name: rec.name,
+          userRecord: rec,
+          // If the student already has a class, drop them at mode-select;
+          // otherwise the route shell will redirect them to /join-class.
+          screen: rec.classId ? 'mode-select' : 'idle',
         }))
-        return 'admin'
-      }
-      const valid = GAME_CONFIG.validClassCodes
-        .map((c) => c.toUpperCase())
-        .includes(normalized)
-      if (!valid) return null
-
-      const trimmedName = name.trim()
-      const userKey = buildUserKey(normalized, trimmedName)
-
-      let userRecord: UserRecord
-      try {
-        userRecord = await recordUser(
-          userKey,
-          trimmedName,
-          normalized,
-          curriculumLevel,
-        )
       } catch (err) {
-        console.warn('[useGameState] login persistence failed:', err)
-        userRecord = {
-          userKey,
-          name: trimmedName,
-          classCode: normalized,
-          curriculumLevel,
-          progress: {},
-          cellStats: {},
-          coins: 0,
-        }
+        console.warn('[useGameState] ensureUserRecord failed:', err)
+        setState((s) => ({
+          ...s,
+          authStatus: 'signed-in',
+          authIdentity: identity,
+        }))
       }
+    })
+    return unsub
+  }, [])
 
-      setLastUser({
-        userKey,
-        role: 'student',
-        name: trimmedName,
-        classCode: normalized,
+  // Links the signed-in student to a class via its class code. Returns
+  // null if the code doesn't match any class. Updates curriculumLevel to
+  // the class's so the leaderboard buckets correctly.
+  const linkClass = useCallback(
+    async (classCode: string): Promise<{ classId: string } | null> => {
+      const cls = await findClassByCode(classCode)
+      if (!cls) return null
+      let result: { classId: string } | null = null
+      const rec = await new Promise<UserRecord | null>((resolve) => {
+        setState((s) => {
+          if (!s.userRecord) {
+            resolve(null)
+            return s
+          }
+          // Resolve outside setState so we don't block React. We use the
+          // current snapshot to decide what to persist.
+          resolve(s.userRecord)
+          return s
+        })
       })
+      if (!rec) return null
+      const updated = await setUserClass(rec, cls.classId, cls.curriculumLevel)
       setState((s) => ({
         ...s,
-        name: trimmedName,
-        userRecord,
+        userRecord: updated,
         screen: 'mode-select',
       }))
-      return 'student'
-    },
-    [],
-  )
-
-  // Tries to rehydrate a previous session from localStorage so the child
-  // (or admin) doesn't have to re-enter their class code on every reload.
-  // Returns the role that was restored, or null if there's nothing to
-  // restore. Idempotent — safe to call multiple times.
-  const restoreSession = useCallback(async (): Promise<
-    'student' | 'admin' | null
-  > => {
-    const last = getLastUser()
-    if (!last) return null
-    if (last.role === 'admin') {
-      setState((s) => ({
-        ...s,
-        name: last.name || 'Admin',
-        screen: 'admin',
-      }))
-      return 'admin'
-    }
-    const rec = await loadUserRecord(last.userKey)
-    if (!rec) {
-      // Stored pointer references a record we can't find anywhere — clear
-      // it so we don't loop on every load.
-      clearLastUser()
-      return null
-    }
-    setState((s) => ({
-      ...s,
-      name: rec.name,
-      userRecord: rec,
-      screen: 'mode-select',
-    }))
-    return 'student'
+      result = { classId: cls.classId }
+      return result
   }, [])
 
   // Picking a digit type lands on the level-start screen so the child can
@@ -685,14 +674,6 @@ export function useGameState() {
     }))
   }, [])
 
-  const showStats = useCallback(() => {
-    setState((s) => ({ ...s, screen: 'stats' }))
-  }, [])
-
-  const hideStats = useCallback(() => {
-    setState((s) => ({ ...s, screen: 'mode-select' }))
-  }, [])
-
   // Replays a cell from the scorecard. Two flavors based on the cell's
   // cleared state:
   //   • Cleared → inRedo=true. Auto-leveling is suppressed so the child's
@@ -752,10 +733,17 @@ export function useGameState() {
     }))
   }, [])
 
-  const logout = useCallback(() => {
+  // Signs the current Firebase Auth user out. The observeAuth listener
+  // will fire next and reset state to 'signed-out'. Errors are swallowed
+  // because the UI doesn't have a meaningful recovery — at worst the user
+  // refreshes and Firebase clears stale state.
+  const signOut = useCallback(async () => {
     clearFeedbackTimer()
-    clearLastUser()
-    setState(INITIAL_STATE)
+    try {
+      await authSignOut()
+    } catch (err) {
+      console.warn('[useGameState] signOut failed:', err)
+    }
   }, [])
 
   // Persist progress whenever the child reaches a new high in the current digit
@@ -778,8 +766,7 @@ export function useGameState() {
 
   const actions = useMemo(
     () => ({
-      login,
-      restoreSession,
+      linkClass,
       startGame,
       confirmLevelStart,
       startNextLevel,
@@ -790,14 +777,11 @@ export function useGameState() {
       enterGetBetterMode,
       exitGetBetterMode,
       changeDigitLevel,
-      showStats,
-      hideStats,
       redoLevel,
-      logout,
+      signOut,
     }),
     [
-      login,
-      restoreSession,
+      linkClass,
       startGame,
       confirmLevelStart,
       startNextLevel,
@@ -808,10 +792,8 @@ export function useGameState() {
       enterGetBetterMode,
       exitGetBetterMode,
       changeDigitLevel,
-      showStats,
-      hideStats,
       redoLevel,
-      logout,
+      signOut,
     ],
   )
 

@@ -76,11 +76,20 @@ export function emptyCellStat(): CellStat {
 }
 
 export interface UserRecord {
+  // Firebase Auth uid — primary key for the user doc.
   userKey: string
+  // Friendly name shown around the UI; admin sees this in the student list.
   name: string
-  classCode: string
-  // Brain-O-Magic curriculum level (F1-F4, L1-L10). Captured at login until
-  // the teacher admin portal owns batch-level promotion.
+  // Login username (lowercased, alphanumeric+_-). Stable identity across
+  // device changes so admins can find the same student in the list.
+  username: string
+  // The class this student is currently linked to. Null until the student
+  // enters a valid class code via JoinClassScreen. The class's curriculum
+  // level wins for leaderboard bucketing.
+  classId: string | null
+  // Brain-O-Magic curriculum level. When linked to a class, this mirrors
+  // the class's level so the student's leaderboard bucket matches their
+  // class. Defaults to 'F1' until linked.
   curriculumLevel: CurriculumLevel
   progress: DigitProgress
   cellStats: CellStats
@@ -90,61 +99,6 @@ export interface UserRecord {
 }
 
 const LS_PREFIX = 'baxiquest:user:'
-// Single-slot pointer to the most recently logged-in identity, so the app
-// can auto-resume on reload instead of re-asking for class code + name.
-// Cleared on explicit logout.
-const LS_LAST_USER_KEY = 'baxiquest:lastUser'
-
-export type LastUserRole = 'student' | 'admin'
-
-export interface LastUser {
-  userKey: string
-  role: LastUserRole
-  // Display name carried over for admin restore (admins don't have a
-  // UserRecord — name is the only field worth preserving).
-  name: string
-  classCode: string
-}
-
-export function getLastUser(): LastUser | null {
-  try {
-    const raw = window.localStorage.getItem(LS_LAST_USER_KEY)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as Partial<LastUser>
-    if (typeof parsed.userKey !== 'string' || !parsed.userKey) return null
-    const role: LastUserRole = parsed.role === 'admin' ? 'admin' : 'student'
-    return {
-      userKey: parsed.userKey,
-      role,
-      name: typeof parsed.name === 'string' ? parsed.name : '',
-      classCode: typeof parsed.classCode === 'string' ? parsed.classCode : '',
-    }
-  } catch {
-    return null
-  }
-}
-
-export function setLastUser(v: LastUser): void {
-  try {
-    window.localStorage.setItem(LS_LAST_USER_KEY, JSON.stringify(v))
-  } catch {
-    // ignore
-  }
-}
-
-export function clearLastUser(): void {
-  try {
-    window.localStorage.removeItem(LS_LAST_USER_KEY)
-  } catch {
-    // ignore
-  }
-}
-
-export function buildUserKey(classCode: string, name: string): string {
-  const code = classCode.trim().toUpperCase()
-  const n = name.trim().toLowerCase().replace(/\s+/g, '_')
-  return `${code}_${n}`
-}
 
 function normalizeAttemptDetail(raw: unknown): AttemptDetail | null {
   if (!raw || typeof raw !== 'object') return null
@@ -204,7 +158,8 @@ function loadFromLocalStorage(userKey: string): UserRecord | null {
     return {
       userKey,
       name: parsed.name ?? '',
-      classCode: parsed.classCode ?? '',
+      username: typeof parsed.username === 'string' ? parsed.username : '',
+      classId: typeof parsed.classId === 'string' ? parsed.classId : null,
       curriculumLevel: isCurriculumLevel(parsed.curriculumLevel)
         ? parsed.curriculumLevel
         : 'F1',
@@ -257,7 +212,8 @@ async function loadFromFirestore(userKey: string): Promise<UserRecord | null> {
     return {
       userKey,
       name: data.name ?? '',
-      classCode: data.classCode ?? '',
+      username: typeof data.username === 'string' ? data.username : '',
+      classId: typeof data.classId === 'string' ? data.classId : null,
       curriculumLevel: isCurriculumLevel(data.curriculumLevel)
         ? data.curriculumLevel
         : 'F1',
@@ -302,24 +258,26 @@ async function saveToFirestore(
   }
 }
 
-export async function recordUser(
-  userKey: string,
-  name: string,
-  classCode: string,
-  curriculumLevel: CurriculumLevel,
-): Promise<UserRecord> {
-  // Load existing record (firestore preferred, ls fallback)
-  const remote = await loadFromFirestore(userKey)
-  const local = loadFromLocalStorage(userKey)
+// Called right after Firebase Auth resolves to load (or create) the
+// student's persistent record. Identity is the Firebase uid; if no record
+// exists yet, an empty one is created with the provided username + name.
+// Existing records keep their progress, cellStats, coins, and classId —
+// only username/name are refreshed from auth.
+export async function ensureUserRecord(args: {
+  uid: string
+  username: string
+  name: string
+}): Promise<UserRecord> {
+  const remote = await loadFromFirestore(args.uid)
+  const local = loadFromLocalStorage(args.uid)
   const existing = remote ?? local
 
-  // Login-time level selection wins — there's no teacher portal yet, so the
-  // child's pick is authoritative for this session and onwards.
   const merged: UserRecord = {
-    userKey,
-    name: name.trim() || existing?.name || '',
-    classCode: classCode.trim().toUpperCase() || existing?.classCode || '',
-    curriculumLevel,
+    userKey: args.uid,
+    name: args.name.trim() || existing?.name || args.username,
+    username: args.username || existing?.username || '',
+    classId: existing?.classId ?? null,
+    curriculumLevel: existing?.curriculumLevel ?? 'F1',
     progress: existing?.progress ?? {},
     cellStats: existing?.cellStats ?? {},
     coins: existing?.coins ?? 0,
@@ -328,7 +286,8 @@ export async function recordUser(
   saveToLocalStorage(merged)
   void saveToFirestore(merged, {
     name: merged.name,
-    classCode: merged.classCode,
+    username: merged.username,
+    classId: merged.classId,
     curriculumLevel: merged.curriculumLevel,
     progress: merged.progress,
     cellStats: merged.cellStats,
@@ -338,17 +297,22 @@ export async function recordUser(
   return merged
 }
 
-// Look up a stored curriculum level for a userKey without fully signing in.
-// Used by the login screen to pre-select the dropdown if the child has
-// logged in before on this device.
-export async function loadKnownCurriculumLevel(
-  userKey: string,
-): Promise<CurriculumLevel | null> {
-  const remote = await loadFromFirestore(userKey)
-  if (remote) return remote.curriculumLevel
-  const local = loadFromLocalStorage(userKey)
-  if (local) return local.curriculumLevel
-  return null
+// Links a student to a class (or unlinks if classId is null). The class's
+// curriculum level is mirrored onto the user record so leaderboard
+// bucketing matches the class's level even if the student never picked
+// one themselves.
+export async function setUserClass(
+  rec: UserRecord,
+  classId: string | null,
+  curriculumLevel: CurriculumLevel,
+): Promise<UserRecord> {
+  const updated: UserRecord = { ...rec, classId, curriculumLevel }
+  saveToLocalStorage(updated)
+  void saveToFirestore(updated, {
+    classId: updated.classId,
+    curriculumLevel: updated.curriculumLevel,
+  })
+  return updated
 }
 
 // Admin: wipe every student record. Clears localStorage and (if Firestore
@@ -406,7 +370,8 @@ export async function loadAllUsers(): Promise<UserRecord[]> {
       remote.push({
         userKey: d.id,
         name: data.name ?? '',
-        classCode: data.classCode ?? '',
+        username: typeof data.username === 'string' ? data.username : '',
+        classId: typeof data.classId === 'string' ? data.classId : null,
         curriculumLevel: isCurriculumLevel(data.curriculumLevel)
           ? data.curriculumLevel
           : 'F1',
