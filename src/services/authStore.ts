@@ -61,11 +61,12 @@ function emailFor(username: string): string {
 }
 
 function usernameFromUser(u: User): string {
-  // displayName is the source of truth (set on signup). Fall back to the
-  // local-part of the email for users created outside the app (e.g. from
-  // the Firebase console).
-  if (u.displayName) return normalizeUsername(u.displayName)
+  // Username is encoded in the synthetic email — local-part is canonical
+  // since it's what was used at signup. displayName carries the friendly
+  // name (e.g. "Aarav") and should NOT be parsed as the username, or the
+  // admin allowlist breaks once Firebase fully hydrates the user object.
   if (u.email) return normalizeUsername(u.email.split('@')[0])
+  if (u.displayName) return normalizeUsername(u.displayName)
   return ''
 }
 
