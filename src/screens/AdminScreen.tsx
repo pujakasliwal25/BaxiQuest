@@ -74,11 +74,11 @@ export function AdminScreen({ adminUid, onLogout }: AdminScreenProps) {
       const u = await clearAllUsers()
       const l = await clearAllLeaderboard()
       setResetSummary(
-        `Cleared ${u.local} local + ${u.remote} remote student record${
-          u.local + u.remote === 1 ? '' : 's'
-        }, and ${l.remote} leaderboard entr${
+        `Cleared ${u.remote} student record${
+          u.remote === 1 ? '' : 's'
+        } and ${l.remote} leaderboard entr${
           l.remote === 1 ? 'y' : 'ies'
-        }${l.local ? ' (plus local mirror)' : ''}. Logging out…`,
+        }. Logging out…`,
       )
       setTimeout(() => onLogout(), 1200)
     } finally {

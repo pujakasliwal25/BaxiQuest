@@ -31,7 +31,6 @@ export interface LeaderboardEntry {
 }
 
 const COLLECTION = 'leaderboardEntries'
-const LS_KEY = 'baxiquest:leaderboard:v1'
 
 // Deterministic doc ID so a user's entry at a given cell is one row that
 // gets overwritten on improvement, not appended.
@@ -59,35 +58,9 @@ export function buildEntry(args: {
   }
 }
 
-function saveEntryToLocalStorage(entry: LeaderboardEntry) {
-  // localStorage mirror — lets the UI degrade to a single-user view when
-  // Firestore isn't configured.
-  try {
-    const raw = window.localStorage.getItem(LS_KEY)
-    const map: Record<string, LeaderboardEntry> = raw ? JSON.parse(raw) : {}
-    const id = entryDocId(entry.cellKey, entry.userKey)
-    map[id] = entry
-    window.localStorage.setItem(LS_KEY, JSON.stringify(map))
-  } catch {
-    // ignore
-  }
-}
-
-function loadEntriesFromLocalStorage(): LeaderboardEntry[] {
-  try {
-    const raw = window.localStorage.getItem(LS_KEY)
-    if (!raw) return []
-    const map = JSON.parse(raw) as Record<string, LeaderboardEntry>
-    return Object.values(map)
-  } catch {
-    return []
-  }
-}
-
 export async function recordLeaderboardEntry(
   entry: LeaderboardEntry,
 ): Promise<void> {
-  saveEntryToLocalStorage(entry)
   const db = getDb()
   if (!db) return
   try {
@@ -132,49 +105,28 @@ export async function loadAllLeaderboardEntries(): Promise<
   LeaderboardEntry[]
 > {
   const db = getDb()
-  if (!db) {
-    return loadEntriesFromLocalStorage()
-  }
+  if (!db) return []
   try {
     const snap = await getDocs(collection(db, COLLECTION))
-    const remote: LeaderboardEntry[] = []
+    const out: LeaderboardEntry[] = []
     snap.forEach((d) => {
       const e = normalizeEntry(d.data())
-      if (e) remote.push(e)
+      if (e) out.push(e)
     })
-    // Merge with localStorage so the current device's just-set bests
-    // appear immediately even if Firestore hasn't propagated yet.
-    const local = loadEntriesFromLocalStorage()
-    const map = new Map<string, LeaderboardEntry>()
-    for (const e of remote) {
-      map.set(entryDocId(e.cellKey, e.userKey), e)
-    }
-    for (const e of local) {
-      const id = entryDocId(e.cellKey, e.userKey)
-      const existing = map.get(id)
-      if (!existing || e.achievedAt > existing.achievedAt) {
-        map.set(id, e)
-      }
-    }
-    return Array.from(map.values())
+    return out
   } catch (err) {
-    console.warn('[leaderboard] read failed, falling back to ls:', err)
-    return loadEntriesFromLocalStorage()
+    console.warn('[leaderboard] read failed:', err)
+    return []
   }
 }
 
-// Admin: wipe the entire leaderboard from both localStorage and Firestore.
+// Admin: wipe the entire leaderboard from Firestore. `local` is kept in
+// the response shape so callers' UI keeps working, but always 0 now —
+// localStorage is no longer used as a store.
 export async function clearAllLeaderboard(): Promise<{
   local: boolean
   remote: number
 }> {
-  let local = false
-  try {
-    if (window.localStorage.getItem(LS_KEY) != null) local = true
-    window.localStorage.removeItem(LS_KEY)
-  } catch (err) {
-    console.warn('[leaderboard] clear local failed:', err)
-  }
   let remote = 0
   const db = getDb()
   if (db) {
@@ -186,7 +138,7 @@ export async function clearAllLeaderboard(): Promise<{
       console.warn('[leaderboard] clear firestore failed:', err)
     }
   }
-  return { local, remote }
+  return { local: false, remote }
 }
 
 // Group entries by cellKey for O(1) lookup in the leaderboard view.

@@ -98,8 +98,6 @@ export interface UserRecord {
   coins: number
 }
 
-const LS_PREFIX = 'baxiquest:user:'
-
 function normalizeAttemptDetail(raw: unknown): AttemptDetail | null {
   if (!raw || typeof raw !== 'object') return null
   const v = raw as Partial<AttemptDetail>
@@ -147,55 +145,6 @@ function normalizeCellStats(raw: unknown): CellStats {
   return out
 }
 
-function loadFromLocalStorage(userKey: string): UserRecord | null {
-  try {
-    const raw = window.localStorage.getItem(LS_PREFIX + userKey)
-    if (!raw) return null
-    const parsed = JSON.parse(raw) as Partial<UserRecord> & {
-      curriculumLevel?: unknown
-      cellStats?: unknown
-    }
-    return {
-      userKey,
-      name: parsed.name ?? '',
-      username: typeof parsed.username === 'string' ? parsed.username : '',
-      classId: typeof parsed.classId === 'string' ? parsed.classId : null,
-      curriculumLevel: isCurriculumLevel(parsed.curriculumLevel)
-        ? parsed.curriculumLevel
-        : 'F1',
-      progress: parsed.progress ?? {},
-      cellStats: normalizeCellStats(parsed.cellStats),
-      coins: typeof parsed.coins === 'number' ? parsed.coins : 0,
-    }
-  } catch {
-    return null
-  }
-}
-
-function loadAllFromLocalStorage(): UserRecord[] {
-  try {
-    const out: UserRecord[] = []
-    for (let i = 0; i < window.localStorage.length; i++) {
-      const key = window.localStorage.key(i)
-      if (!key || !key.startsWith(LS_PREFIX)) continue
-      const userKey = key.slice(LS_PREFIX.length)
-      const rec = loadFromLocalStorage(userKey)
-      if (rec) out.push(rec)
-    }
-    return out
-  } catch {
-    return []
-  }
-}
-
-function saveToLocalStorage(rec: UserRecord) {
-  try {
-    window.localStorage.setItem(LS_PREFIX + rec.userKey, JSON.stringify(rec))
-  } catch {
-    // ignore
-  }
-}
-
 async function loadFromFirestore(userKey: string): Promise<UserRecord | null> {
   const db = getDb()
   if (!db) return null
@@ -227,15 +176,15 @@ async function loadFromFirestore(userKey: string): Promise<UserRecord | null> {
   }
 }
 
-// Public read used for session restore: prefers Firestore so a child who
-// signed in on another device still picks up their progress on first
-// visit; falls back to whatever's on this device.
+// Public read used for session restore: always hits Firestore. With the
+// localStorage layer removed, a network failure here means the caller
+// gets null and the user is treated as fresh — that's intentional, so we
+// never display stale on-device state that doesn't match the source of
+// truth.
 export async function loadUserRecord(
   userKey: string,
 ): Promise<UserRecord | null> {
-  const remote = await loadFromFirestore(userKey)
-  if (remote) return remote
-  return loadFromLocalStorage(userKey)
+  return loadFromFirestore(userKey)
 }
 
 async function saveToFirestore(
@@ -263,14 +212,16 @@ async function saveToFirestore(
 // exists yet, an empty one is created with the provided username + name.
 // Existing records keep their progress, cellStats, coins, and classId —
 // only username/name are refreshed from auth.
+//
+// The Firestore write is awaited (not fire-and-forget) because the caller
+// uses the returned record to decide where to route the user — we must
+// know the record is actually persisted before that decision.
 export async function ensureUserRecord(args: {
   uid: string
   username: string
   name: string
 }): Promise<UserRecord> {
-  const remote = await loadFromFirestore(args.uid)
-  const local = loadFromLocalStorage(args.uid)
-  const existing = remote ?? local
+  const existing = await loadFromFirestore(args.uid)
 
   const merged: UserRecord = {
     userKey: args.uid,
@@ -283,8 +234,7 @@ export async function ensureUserRecord(args: {
     coins: existing?.coins ?? 0,
   }
 
-  saveToLocalStorage(merged)
-  void saveToFirestore(merged, {
+  await saveToFirestore(merged, {
     name: merged.name,
     username: merged.username,
     classId: merged.classId,
@@ -297,43 +247,30 @@ export async function ensureUserRecord(args: {
   return merged
 }
 
-// Links a student to a class (or unlinks if classId is null). The class's
-// curriculum level is mirrored onto the user record so leaderboard
-// bucketing matches the class's level even if the student never picked
-// one themselves.
+// Links a student to a class (or unlinks if classId is null). Awaited
+// because the caller navigates to /game immediately after — if the write
+// is in-flight when they answer the first question, we'd race against
+// the in-game writes.
 export async function setUserClass(
   rec: UserRecord,
   classId: string | null,
   curriculumLevel: CurriculumLevel,
 ): Promise<UserRecord> {
   const updated: UserRecord = { ...rec, classId, curriculumLevel }
-  saveToLocalStorage(updated)
-  void saveToFirestore(updated, {
+  await saveToFirestore(updated, {
     classId: updated.classId,
     curriculumLevel: updated.curriculumLevel,
   })
   return updated
 }
 
-// Admin: wipe every student record. Clears localStorage and (if Firestore
-// is configured) deletes every doc in the users collection. Returns the
-// number of records cleared from each source.
+// Admin: wipe every student record from Firestore. Returns the number
+// cleared (`local` is kept in the shape for callers' UI but always 0
+// now — localStorage is no longer used as a store).
 export async function clearAllUsers(): Promise<{
   local: number
   remote: number
 }> {
-  let local = 0
-  try {
-    const toRemove: string[] = []
-    for (let i = 0; i < window.localStorage.length; i++) {
-      const k = window.localStorage.key(i)
-      if (k && k.startsWith(LS_PREFIX)) toRemove.push(k)
-    }
-    for (const k of toRemove) window.localStorage.removeItem(k)
-    local = toRemove.length
-  } catch (err) {
-    console.warn('[progressStore] clearAllUsers local failed:', err)
-  }
   let remote = 0
   const db = getDb()
   if (db) {
@@ -345,20 +282,17 @@ export async function clearAllUsers(): Promise<{
       console.warn('[progressStore] clearAllUsers firestore failed:', err)
     }
   }
-  return { local, remote }
+  return { local: 0, remote }
 }
 
-// Admin: fetch every user record we know about. Tries Firestore first and
-// falls back to (or merges with) localStorage so admins testing locally
-// without Firebase configured still see at least the records on this
-// device. When both sources have a user, Firestore wins.
+// Admin: fetch every user record from Firestore. Returns an empty list
+// if Firestore is unconfigured or the read fails.
 export async function loadAllUsers(): Promise<UserRecord[]> {
-  const local = loadAllFromLocalStorage()
   const db = getDb()
-  if (!db) return local
+  if (!db) return []
   try {
     const snap = await getDocs(collection(db, 'users'))
-    const remote: UserRecord[] = []
+    const out: UserRecord[] = []
     snap.forEach((d) => {
       const data = d.data() as
         | (Partial<UserRecord> & {
@@ -367,7 +301,7 @@ export async function loadAllUsers(): Promise<UserRecord[]> {
           })
         | undefined
       if (!data) return
-      remote.push({
+      out.push({
         userKey: d.id,
         name: data.name ?? '',
         username: typeof data.username === 'string' ? data.username : '',
@@ -380,16 +314,17 @@ export async function loadAllUsers(): Promise<UserRecord[]> {
         coins: typeof data.coins === 'number' ? data.coins : 0,
       })
     })
-    const map = new Map<string, UserRecord>()
-    for (const r of local) map.set(r.userKey, r)
-    for (const r of remote) map.set(r.userKey, r)
-    return Array.from(map.values())
+    return out
   } catch (err) {
     console.warn('[progressStore] admin load all failed:', err)
-    return local
+    return []
   }
 }
 
+// In-game write — fire-and-forget so the UI doesn't hitch on every
+// level-up. If the network drops mid-round the local state already
+// reflects the new high; next page load will re-fetch from Firestore and
+// recover whatever did land.
 export async function saveProgress(
   rec: UserRecord,
   digitType: DigitType,
@@ -403,7 +338,6 @@ export async function saveProgress(
     progress: { ...rec.progress, [digitType]: numberCount },
   }
 
-  saveToLocalStorage(updated)
   void saveToFirestore(updated, { progress: updated.progress })
 
   return updated
@@ -434,7 +368,6 @@ export async function recordCellAttemptStart(
     ...rec,
     cellStats: { ...rec.cellStats, [key]: next },
   }
-  saveToLocalStorage(updated)
   void saveToFirestore(updated, { cellStats: updated.cellStats })
   return updated
 }
@@ -509,7 +442,6 @@ export async function recordCellAnswer(
     ...rec,
     cellStats: { ...rec.cellStats, [key]: next },
   }
-  saveToLocalStorage(updated)
   void saveToFirestore(updated, { cellStats: updated.cellStats })
   return updated
 }
@@ -525,7 +457,6 @@ export async function addCoins(
     ...rec,
     coins: (rec.coins ?? 0) + Math.round(amount),
   }
-  saveToLocalStorage(updated)
   void saveToFirestore(updated, { coins: updated.coins })
   return updated
 }
