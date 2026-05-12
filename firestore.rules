@@ -61,7 +61,15 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // Anything outside the three known collections is rejected.
+    // Audit log written by the adminResetStudentPassword Cloud Function.
+    // The function uses the Admin SDK which bypasses rules, but locking
+    // client access down here keeps clients from forging entries.
+    match /passwordResets/{id} {
+      allow read: if isAdmin();
+      allow write: if false;
+    }
+
+    // Anything outside the four known collections is rejected.
     match /{document=**} {
       allow read, write: if false;
     }

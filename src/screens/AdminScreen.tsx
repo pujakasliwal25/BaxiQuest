@@ -1,5 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  adminCreateStudent,
+  adminResetStudentPassword,
+  AuthError,
+  CloudFunctionUnavailable,
+} from '../services/authStore'
+import {
   type ClassRecord,
   createClass,
   deleteClass,
@@ -25,6 +31,7 @@ interface AdminScreenProps {
   // so we can show ownership later.
   adminUid: string
   onLogout: () => void
+  onChangePassword: () => void
 }
 
 function clearedCount(cellStats: CellStats): number {
@@ -51,7 +58,11 @@ function fmtDate(at: number | null): string {
   return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
 }
 
-export function AdminScreen({ adminUid, onLogout }: AdminScreenProps) {
+export function AdminScreen({
+  adminUid,
+  onLogout,
+  onChangePassword,
+}: AdminScreenProps) {
   const [tab, setTab] = useState<AdminTab>('students')
   const [users, setUsers] = useState<UserRecord[] | null>(null)
   const [classes, setClasses] = useState<ClassRecord[] | null>(null)
@@ -167,6 +178,12 @@ export function AdminScreen({ adminUid, onLogout }: AdminScreenProps) {
         <h1 className="text-lg font-bold">Admin</h1>
         <div className="flex items-center gap-2">
           <button
+            onClick={onChangePassword}
+            className="text-sm text-text-muted hover:text-white px-2 py-1"
+          >
+            Change password
+          </button>
+          <button
             onClick={() => setResetConfirm(true)}
             className="text-sm text-quest-red hover:underline px-2 py-1"
           >
@@ -207,6 +224,7 @@ export function AdminScreen({ adminUid, onLogout }: AdminScreenProps) {
           classes={classes}
           users={users}
           onClassesChange={setClasses}
+          onUsersChange={setUsers}
         />
       ) : (
         <StudentsTab
@@ -406,10 +424,13 @@ function StudentsTab({
                   ? (classMap.get(u.classId)?.name ?? 'Unknown class')
                   : 'Unassigned'
                 return (
-                  <li key={u.userKey}>
+                  <li
+                    key={u.userKey}
+                    className="rounded-card bg-card-surface border border-card-border p-3 hover:border-magic-gold transition-colors"
+                  >
                     <button
                       onClick={() => onSelect(u.userKey)}
-                      className="w-full text-left rounded-card bg-card-surface border border-card-border p-3 active:scale-[0.99] transition-transform hover:border-magic-gold"
+                      className="w-full text-left active:scale-[0.99] transition-transform"
                     >
                       <div className="flex items-center justify-between mb-1">
                         <span className="font-bold text-base">
@@ -432,6 +453,7 @@ function StudentsTab({
                         </span>
                       </div>
                     </button>
+                    <ResetPasswordButton uid={u.userKey} username={u.username} />
                   </li>
                 )
               })}
@@ -448,6 +470,7 @@ interface ClassesTabProps {
   classes: ClassRecord[] | null
   users: UserRecord[] | null
   onClassesChange: (cs: ClassRecord[]) => void
+  onUsersChange: (us: UserRecord[]) => void
 }
 
 function ClassesTab({
@@ -455,11 +478,16 @@ function ClassesTab({
   classes,
   users,
   onClassesChange,
+  onUsersChange,
 }: ClassesTabProps) {
   const [name, setName] = useState('')
   const [level, setLevel] = useState<CurriculumLevel>('F1')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Which class's "Add student" form is open. null = none open.
+  const [addStudentForClass, setAddStudentForClass] = useState<string | null>(
+    null,
+  )
 
   // Map classId → student count for the class list summary.
   const studentCounts = useMemo(() => {
@@ -592,27 +620,258 @@ function ClassesTab({
                     Delete
                   </button>
                 </div>
-                <div className="mt-2 inline-flex items-center gap-2 rounded-btn bg-bg-navy border border-magic-gold/40 px-3 py-1.5">
-                  <span className="text-[10px] text-text-muted uppercase tracking-wider font-bold">
-                    Code
-                  </span>
-                  <code className="text-magic-gold font-extrabold tracking-[0.2em] text-base">
-                    {c.code}
-                  </code>
+                <div className="mt-2 flex items-center gap-2 flex-wrap">
+                  <div className="inline-flex items-center gap-2 rounded-btn bg-bg-navy border border-magic-gold/40 px-3 py-1.5">
+                    <span className="text-[10px] text-text-muted uppercase tracking-wider font-bold">
+                      Code
+                    </span>
+                    <code className="text-magic-gold font-extrabold tracking-[0.2em] text-base">
+                      {c.code}
+                    </code>
+                    <button
+                      onClick={() => {
+                        void navigator.clipboard?.writeText(c.code)
+                      }}
+                      className="text-baxi-blue text-[11px] font-semibold hover:underline"
+                    >
+                      Copy
+                    </button>
+                  </div>
                   <button
-                    onClick={() => {
-                      void navigator.clipboard?.writeText(c.code)
-                    }}
-                    className="text-baxi-blue text-[11px] font-semibold hover:underline"
+                    onClick={() =>
+                      setAddStudentForClass(
+                        addStudentForClass === c.classId ? null : c.classId,
+                      )
+                    }
+                    className="text-xs bg-baxi-blue text-bg-navy font-bold px-3 py-1.5 rounded-btn"
                   >
-                    Copy
+                    {addStudentForClass === c.classId ? 'Close' : '+ Add student'}
                   </button>
                 </div>
+                {addStudentForClass === c.classId && (
+                  <AddStudentForm
+                    cls={c}
+                    onCreated={(rec) => {
+                      onUsersChange([...(users ?? []), rec])
+                      setAddStudentForClass(null)
+                    }}
+                  />
+                )}
               </li>
             )
           })}
         </ul>
       )}
     </div>
+  )
+}
+
+interface AddStudentFormProps {
+  cls: ClassRecord
+  onCreated: (rec: UserRecord) => void
+}
+
+function AddStudentForm({ cls, onCreated }: AddStudentFormProps) {
+  const [name, setName] = useState('')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      const { uid } = await adminCreateStudent({
+        username,
+        password,
+        name: name.trim() || username,
+        classId: cls.classId,
+        curriculumLevel: cls.curriculumLevel,
+      })
+      // Synthesize a minimal UserRecord to push into the list; the next
+      // admin load will fetch the real one. Avoids a roundtrip.
+      onCreated({
+        userKey: uid,
+        name: name.trim() || username,
+        username: username.toLowerCase(),
+        classId: cls.classId,
+        curriculumLevel: cls.curriculumLevel,
+        progress: {},
+        cellStats: {},
+        coins: 0,
+      })
+      setName('')
+      setUsername('')
+      setPassword('')
+    } catch (err) {
+      if (err instanceof AuthError) setError(err.message)
+      else if (err instanceof Error) setError(err.message)
+      else setError('Could not create student.')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="mt-3 rounded-card bg-bg-navy border border-card-border p-3 space-y-2"
+    >
+      <div className="text-[10px] text-text-muted uppercase tracking-wider font-bold">
+        Add a student to {cls.name}
+      </div>
+      <input
+        type="text"
+        value={name}
+        onChange={(e) => {
+          setName(e.target.value)
+          setError(null)
+        }}
+        placeholder="First name (optional)"
+        disabled={busy}
+        className="w-full bg-card-surface text-white text-sm px-3 py-2 rounded-btn border border-card-border focus:border-deep-blue focus:outline-none"
+      />
+      <input
+        type="text"
+        value={username}
+        autoCapitalize="none"
+        onChange={(e) => {
+          setUsername(e.target.value.toLowerCase())
+          setError(null)
+        }}
+        placeholder="Username (lowercase, 2-24 chars)"
+        disabled={busy}
+        className="w-full bg-card-surface text-white text-sm px-3 py-2 rounded-btn border border-card-border focus:border-deep-blue focus:outline-none"
+      />
+      <input
+        type="text"
+        value={password}
+        onChange={(e) => {
+          setPassword(e.target.value)
+          setError(null)
+        }}
+        placeholder="Initial password (6+ chars)"
+        disabled={busy}
+        className="w-full bg-card-surface text-white text-sm px-3 py-2 rounded-btn border border-card-border focus:border-deep-blue focus:outline-none"
+      />
+      {error && <div className="text-quest-red text-xs">{error}</div>}
+      <button
+        type="submit"
+        disabled={busy || !username || !password}
+        className="w-full min-h-touch bg-magic-gold text-bg-navy font-bold rounded-btn px-3 py-2 active:scale-[0.99] transition-transform disabled:opacity-60 text-sm"
+      >
+        {busy ? 'Creating…' : 'Create account'}
+      </button>
+      <p className="text-[10px] text-text-muted">
+        Tell the student their username and initial password. They can
+        change it from their home screen.
+      </p>
+    </form>
+  )
+}
+
+// Inline "Reset password" widget on a student row. Expands into a small
+// form when clicked, calls the adminResetStudentPassword Cloud Function.
+// If the function isn't deployed yet, the error message tells the admin
+// to follow the deploy instructions in the README.
+function ResetPasswordButton({
+  uid,
+  username,
+}: {
+  uid: string
+  username: string
+}) {
+  const [open, setOpen] = useState(false)
+  const [newPassword, setNewPassword] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [done, setDone] = useState(false)
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      await adminResetStudentPassword({ uid, newPassword })
+      setDone(true)
+      setNewPassword('')
+      setTimeout(() => {
+        setDone(false)
+        setOpen(false)
+      }, 1500)
+    } catch (err) {
+      if (
+        err instanceof CloudFunctionUnavailable ||
+        err instanceof AuthError ||
+        err instanceof Error
+      ) {
+        setError(err.message)
+      } else {
+        setError('Could not reset password.')
+      }
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="mt-2 text-[11px] text-baxi-blue font-semibold hover:underline"
+      >
+        Reset password
+      </button>
+    )
+  }
+
+  return (
+    <form onSubmit={submit} className="mt-2 space-y-2">
+      <div className="text-[10px] text-text-muted">
+        Setting new password for @{username || uid.slice(0, 8)}
+      </div>
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={newPassword}
+          onChange={(e) => {
+            setNewPassword(e.target.value)
+            setError(null)
+          }}
+          placeholder="New password (6+ chars)"
+          disabled={busy}
+          className="flex-1 bg-bg-navy text-white text-xs px-3 py-2 rounded-btn border border-card-border focus:border-deep-blue focus:outline-none"
+        />
+        <button
+          type="submit"
+          disabled={busy || newPassword.length < 6}
+          className="text-xs bg-magic-gold text-bg-navy font-bold px-3 py-2 rounded-btn disabled:opacity-60"
+        >
+          {busy ? '…' : 'Set'}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false)
+            setError(null)
+            setNewPassword('')
+          }}
+          disabled={busy}
+          className="text-xs bg-card-surface border border-card-border text-white font-bold px-2 py-2 rounded-btn"
+        >
+          Cancel
+        </button>
+      </div>
+      {error && <div className="text-quest-red text-[11px]">{error}</div>}
+      {done && (
+        <div className="text-level-green text-[11px] font-bold">
+          Password updated.
+        </div>
+      )}
+    </form>
   )
 }

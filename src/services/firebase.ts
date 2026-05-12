@@ -1,6 +1,7 @@
 import { getApps, initializeApp, type FirebaseApp } from 'firebase/app'
 import { type Auth, getAuth } from 'firebase/auth'
 import { getFirestore, type Firestore } from 'firebase/firestore'
+import { type Functions, getFunctions } from 'firebase/functions'
 
 interface FirebaseEnv {
   apiKey: string
@@ -28,9 +29,19 @@ function readEnv(): FirebaseEnv | null {
   }
 }
 
+// Public version of readEnv — needed by authStore so it can spin up a
+// secondary Firebase App when the admin creates a student account
+// (createUserWithEmailAndPassword on the primary app would auto-sign the
+// admin out and into the new student, which is the opposite of what we
+// want here).
+export function getFirebaseConfig(): FirebaseEnv | null {
+  return readEnv()
+}
+
 let cachedApp: FirebaseApp | null = null
 let cachedDb: Firestore | null = null
 let cachedAuth: Auth | null = null
+let cachedFunctions: Functions | null = null
 let initAttempted = false
 
 function ensureApp(): FirebaseApp | null {
@@ -69,6 +80,19 @@ export function getAuthClient(): Auth | null {
     return cachedAuth
   } catch (err) {
     console.warn('[firebase] failed to get auth:', err)
+    return null
+  }
+}
+
+export function getFunctionsClient(): Functions | null {
+  if (cachedFunctions) return cachedFunctions
+  const app = ensureApp()
+  if (!app) return null
+  try {
+    cachedFunctions = getFunctions(app, 'us-central1')
+    return cachedFunctions
+  } catch (err) {
+    console.warn('[firebase] failed to get functions:', err)
     return null
   }
 }

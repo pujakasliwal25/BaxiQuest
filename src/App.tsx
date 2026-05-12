@@ -3,6 +3,8 @@ import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { FeedbackOverlay } from './components/FeedbackOverlay'
 import { useGameState } from './hooks/useGameState'
 import { AdminScreen } from './screens/AdminScreen'
+import { ChangePasswordScreen } from './screens/ChangePasswordScreen'
+import { ForgotPasswordScreen } from './screens/ForgotPasswordScreen'
 import { GetBetterScreen } from './screens/GetBetterScreen'
 import { JoinClassScreen } from './screens/JoinClassScreen'
 import { LevelStartScreen } from './screens/LevelStartScreen'
@@ -57,6 +59,11 @@ export default function App() {
           path="/admin"
           element={<AdminRoute state={state} actions={actions} />}
         />
+        <Route
+          path="/change-password"
+          element={<ChangePasswordRoute state={state} />}
+        />
+        <Route path="/forgot-password" element={<ForgotPasswordScreen />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       {state.feedback && <FeedbackOverlay feedback={state.feedback} />}
@@ -207,6 +214,11 @@ function GameRoute({ state, actions }: RouteProps) {
       userRecord={state.userRecord}
       onPickDigitType={(dt) => actions.startGame(dt)}
       onShowStats={() => navigate('/game/stats')}
+      onChangePassword={() => navigate('/change-password')}
+      onSignOut={() => {
+        actions.signOut()
+        navigate('/signin', { replace: true })
+      }}
     />
   )
 }
@@ -238,6 +250,28 @@ function AdminRoute({ state, actions }: RouteProps) {
         actions.signOut()
         navigate('/signin', { replace: true })
       }}
+      onChangePassword={() => navigate('/change-password')}
+    />
+  )
+}
+
+function ChangePasswordRoute({ state }: { state: GameStateValue }) {
+  const navigate = useNavigate()
+  if (state.authStatus !== 'signed-in') return <Navigate to="/signin" replace />
+  // After a successful update we want to return to wherever the user was
+  // before (admin → /admin, student → /game). We can't infer that
+  // perfectly without a referrer; use authIdentity.role as the proxy.
+  const home =
+    state.authIdentity?.role === 'admin'
+      ? '/admin'
+      : state.userRecord?.classId
+        ? '/game'
+        : '/join-class'
+  return (
+    <ChangePasswordScreen
+      displayName={state.authIdentity?.displayName ?? 'You'}
+      onSuccess={() => navigate(home, { replace: true })}
+      onCancel={() => navigate(home, { replace: true })}
     />
   )
 }

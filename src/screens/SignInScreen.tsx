@@ -94,6 +94,13 @@ export function SignInScreen({ onSuccess }: SignInScreenProps) {
           </button>
         </form>
 
+        <Link
+          to="/forgot-password"
+          className="text-text-muted text-xs mt-3 hover:text-white"
+        >
+          Forgot your password?
+        </Link>
+
         <p className="text-text-muted text-sm mt-6">
           New here?{' '}
           <Link to="/signup" className="text-baxi-blue font-semibold hover:underline">

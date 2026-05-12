@@ -6,3 +6,10 @@ dist-ssr
 .env.*.local
 .DS_Store
 .vite
+
+# Cloud Functions build artifacts
+functions/lib
+functions/node_modules
+functions/.firebase
+firebase-debug.log
+firebase-debug.*.log

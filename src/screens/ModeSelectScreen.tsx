@@ -18,6 +18,8 @@ interface ModeSelectScreenProps {
   userRecord: UserRecord | null
   onPickDigitType: (digitType: DigitType) => void
   onShowStats: () => void
+  onChangePassword: () => void
+  onSignOut: () => void
 }
 
 function formatAvgSeconds(ms: number): string {
@@ -32,6 +34,8 @@ export function ModeSelectScreen({
   userRecord,
   onPickDigitType,
   onShowStats,
+  onChangePassword,
+  onSignOut,
 }: ModeSelectScreenProps) {
   return (
     <div className="h-full overflow-y-auto flex flex-col px-6 py-8 max-w-md mx-auto w-full">
@@ -40,6 +44,21 @@ export function ModeSelectScreen({
           <h1 className="text-3xl font-bold leading-tight">
             Hi {name}!<br />Ready to quest?
           </h1>
+          <div className="flex gap-3 mt-2 text-xs">
+            <button
+              onClick={onChangePassword}
+              className="text-text-muted hover:text-white"
+            >
+              Change password
+            </button>
+            <span className="text-text-muted">·</span>
+            <button
+              onClick={onSignOut}
+              className="text-text-muted hover:text-white"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
         <div className="shrink-0 animate-baxi-idle inline-block">
           <Baxi size={84} />
